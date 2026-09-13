@@ -1,7 +1,6 @@
 # IgorVision – Image Quality Inspector
 
-Bokeh-bewusster, modularer Bildqualitäts-Checker im Stil von
-**Agisoft Metashape „Check image quality"**: erkennt unscharfe Bilder und
+Bokeh-bewusster, modularer Bildqualitäts-Checker. Erkennt unscharfe Bilder und
 schlechte Belichtung – und klassifiziert Bilder mit **scharfem Objekt
 und Bokeh-Hintergrund** korrekt als scharf.
 
