@@ -40,9 +40,7 @@ python main.py
 - "Move to Keep / Reject Folder", "Open in Explorer", CSV export
   (55 columns including all photogrammetry, exposure/WB, and EXIF fields)
 
-## Screenshots
 
-_TODO: add 1–2 app screenshots (e.g. `docs/screenshot.png`) and reference them here._
 
 ## Architecture
 
