@@ -1,0 +1,21 @@
+# IgorVision – Python dependencies
+#
+# Install with:  pip install -r requirements.txt
+
+opencv-python>=4.8
+numpy>=1.24
+Pillow>=10.0
+pandas>=2.0
+PyQt5>=5.15
+
+# ---------------------------------------------------------------------------
+# Optional format backends (Phase 1 ingestion).
+# The core app runs fine without them – unsupported formats fall back to a
+# friendly "install …" note instead of crashing.  Install for:
+#   * camera RAW files (.dng .cr2 .nef .arw …)  → rawpy
+#   * HEIC/HEIF (iPhone, some Android, modern drone/phone stills) → pillow-heif
+#
+#   pip install rawpy pillow-heif
+# ---------------------------------------------------------------------------
+# rawpy>=0.27
+# pillow-heif>=0.11
