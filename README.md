@@ -176,6 +176,54 @@ All toggles + thresholds are in [`config.py`](config.py):
 `exposure_consistency`, `wb_consistency`, `low_dynamic_range_check`,
 `iso_consistency`, `aperture_consistency`.
 
+## Sequential Overlap Scan (SIFT / AKAZE)
+
+For photogrammetry, consecutive images in a capture sequence should
+overlap. IgorVision can scan an entire batch for **pair-wise geometric
+overlap** – useful for verifying coverage before importing into an
+SfM pipeline.
+
+### How it works
+
+1. Images are sorted by path and processed **sequentially** (image *i*
+is compared against image *i−1*).
+2. For each pair, the pipeline runs:
+   - **SIFT** keypoint detection (default **5 000** features per image)
+   - **Lowe ratio test** (default threshold **0.75**) to filter matches
+   - **Bidirectional RANSAC homography** – both directions (1→2 and
+     2→1) are estimated; the one with more inliers is used
+   - **12 × 12 grid-sampling** of the homography to measure the
+     fraction of image area geometrically covered by the other image
+   - **AKAZE fallback** – if SIFT yields < 20 good matches, AKAZE
+     is tried with a looser ratio threshold (0.80)
+3. **Reliability gate**: fewer than **8 RANSAC inliers** → overlap is
+   reported as **0.0** (UI displays "?") to avoid false positives on
+   repetitive textures (bark, grass, thatch).
+
+### Output per pair
+
+| Value | Range | Meaning |
+|---|---|---|
+| `overlap_next` | 0.0 – 1.0 | Fraction of image area covered by the next image (1.0 ≈ near-duplicate) |
+| `overlap_matches` | int | Good matches after ratio test (< 8 → unreliable) |
+| `overlap_inlier_ratio` | 0.0 – 1.0 | Fraction of good matches that are RANSAC inliers |
+
+### Live visualisation
+
+While the scan runs, the UI preview shows **SIFT keypoints** (red dots
+with white ring) on each image as it is processed, so you can see
+where features were detected and how the overlap is computed.
+
+### Configuration
+
+All parameters are in [`config.py`](config.py):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `sift_n_features` | 5000 | Max SIFT keypoints per image |
+| `sift_ratio` | 0.75 | Lowe ratio test threshold |
+| `sift_ransac_px` | 5.0 | RANSAC reprojection threshold (pixels) |
+
 ## Calibration
 
 All values are in [`config.py`](config.py) (`DEFAULT_CONFIG`).
