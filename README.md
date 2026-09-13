@@ -1,256 +1,247 @@
 # IgorVision – Image Quality Inspector
 
-Bokeh-bewusster, modularer Bildqualitäts-Checker. Erkennt unscharfe Bilder und
-schlechte Belichtung – und klassifiziert Bilder mit **scharfem Objekt
-und Bokeh-Hintergrund** korrekt als scharf.
+Bokeh-aware, modular image quality checker for photogrammetry workflows.
+Detects blurry images, poor exposure, and misaligned sets – while
+correctly classifying images with a **sharp subject and bokeh
+background** as sharp.
 
 ```
 python main.py
 ```
 
-## Funktionsumfang
+## Features
 
-- Ordner- oder Dateiauswahl, rekursives Scannen optional
-- CPU-Kerne-Slider (Multiprocessing via `ProcessPoolExecutor`)
-- Fortschrittsbalken + Abbruch
-- Ergebnistabelle mit Thumbnails, farbiger Score, Status
+- Folder or file selection, recursive scanning (optional)
+- CPU-core slider (multiprocessing via `ProcessPoolExecutor`)
+- Progress bar + abort
+- Results table with thumbnails, colour-coded score, status
   (🟢 Sharp / 🔴 Blurry / 🟡 Soft (Motion) · Exposure · Clipping · Few Features
-  · Duplicate · Expo drift · WB drift · Flat · Hi-ISO · Aperture drift), sortierbar
-- **Photogrammetrie-Checks (SfM-Readiness)**:
-  - **Feature-Dichte** (Harris-Kanten) – erkennt „scharf, aber ohne
-    Struktur“ (Himmel, Wand, Wasser) wie Metashapes „no features found“
-  - **Clipping** – überbelichtete Highlights / zugeknickte Schatten
-  - **Duplikate** (MD5) – jede Datei nach der ersten der Gruppe wird
-    markiert und verweist auf das Original
-  - **Langzeiter-Bestätigung** aus EXIF (Verschlusszeit > 1/Brennweite)
-- **Formate**: JPEG, PNG, **16-bit TIFF**, **RAW** (`.dng .cr2 .nef .arw …`,
+  · Duplicate · Expo drift · WB drift · Flat · Hi-ISO · Aperture drift), sortable
+- **Photogrammetry checks (SfM-readiness)**:
+  - **Feature density** (Harris edges) – detects "sharp but structureless"
+    images (sky, wall, water, snow) that would fail feature matching
+  - **Clipping** – overexposed highlights / crushed shadows
+  - **Duplicates** (MD5) – every file after the first in a group is
+    flagged and linked back to the original
+  - **Slow-shutter flag** from EXIF (shutter speed > 1/focal-length)
+- **Formats**: JPEG, PNG, **16-bit TIFF**, **RAW** (`.dng .cr2 .nef .arw …`,
   optional `rawpy`), **HEIC/HEIF** (optional `pillow-heif`)
-- **EXIF**: Kamera, Blende, Verschluss, ISO, Brennweite, GPS, Datum –
-  im Info-Panel + CSV; EXIF-Orientierung wird einmal angewendet
-- Qualitäts-Filter (Schwellwert-Slider, „Blurry Only")
-- **Batch-Statistik-Panel**: Status-Zählung, 24-Bin-Score-Histogram mit
-  Threshold-Marker, Best/Worst-Bild (Klick → in Tabelle auswählen)
-- **Preview-Paneel in voller Auflösung** mit Zoom-Steuerung:
-  - `+` / `−` Zoom-Buttons, Mausrad-Zoom (unter dem Cursor)
-  - `Zentrieren` (Bild zentrieren) und `Passend` (übersicht)
-  - Zoom-Dropdown mit Presets **25 % / 50 % / 100 % / 200 % / 300 %**
-    (100 % = 1 Bild-Pixel = 1 Bildschirm-Pixel)
-- Preview-Paneel (Zoom/Shift-Scroll), Doppelklick = Vollbild-Dialog
-- „Move to Keep/Reject Folder", „Open in Explorer", CSV-Export
-  (55 Spalten inkl. aller Photogrammetrie-, Belichtung/WB- + EXIF-Felder)
+- **EXIF**: camera, aperture, shutter, ISO, focal length, GPS, date –
+  in info panel + CSV; EXIF orientation applied once
+- Quality filters (threshold slider, "Blurry Only")
+- **Batch statistics panel**: status counts, 24-bin score histogram with
+  threshold marker, best/worst image (click → select in table)
+- **Full-resolution preview panel** with zoom controls:
+  - `+` / `−` zoom buttons, mouse-wheel zoom (anchored under cursor)
+  - **Centre** (re-centre image) and **Fit** (overview)
+  - Zoom dropdown with presets **25 % / 50 % / 100 % / 200 % / 300 %**
+    (100 % = 1 image pixel = 1 screen pixel)
+- Preview panel (zoom / Shift-scroll), double-click = full-screen dialog
+- "Move to Keep / Reject Folder", "Open in Explorer", CSV export
+  (55 columns including all photogrammetry, exposure/WB, and EXIF fields)
 
 ## Screenshots
 
-_TODO: 1–2 App-Screenshots (z. B. `docs/screenshot.png`) einfügen und hier
-referenzieren – wichtig für die Produktseite._
+_TODO: add 1–2 app screenshots (e.g. `docs/screenshot.png`) and reference them here._
 
-## Architektur
+## Architecture
 
-| Datei | Rolle |
+| File | Role |
 |---|---|
-| `main.py` | Entry-Point, `QApplication` + `MainWindow` (UI wird lazy importiert – Worker-Prozesse laden kein PyQt) |
-| `config.py` | **Alle** Tuning-Parameter (`AnalysisConfig`) |
-| `models.py` | Datenklassen (`BlockMetrics`, `ImageQualityMetrics`), gemeinsamer `status_text` |
-| `imageio.py` | **Ingestion** (Phase 1): Loader-Dispatch (cv2/pillow-heif/rawpy), EXIF-Parsing, 16-bit/RAW-Normalisierung, MD5, reduziertes Decode |
-| `metrics.py` | Downsampling, Block-Sharpness (ein Laplacian-Pass), Motion-Blur-Merkmale, **Feature-Dichte** (Harris) + **Clip-Stats** (Phase 2), **Belichtung/WB** (Kelvin, EV, White-Point-Gain, Phase 3), globale Info-Metriken |
-| `scoring.py` | Bokeh-bewusstes, **absolutes** Scoring (auflösungs-normalisiert) |
-| `workers.py` | Multiprocessing-Pipeline, Duplikat-Markierung, Slow-Shutter, **Set-Konsistenz: Expo/WB/ISO/Blende** (Phase 3), Prognose-Callback, Stop-Event |
-| `utils.py` | Thumbnails, Dateisammlung |
-| `ui/main_window.py` | Hauptfenster, Worker-QThread, Aktionen, `build_export_rows`, CSV-Export, Stats-Wiring |
-| `ui/table_model.py` | Ergebnistabelle (Farbcodierung, Status via `status_text`) |
-| `ui/stats_panel.py` | **Batch-Statistik** (Phase 2): Zählung + 24-Bin-Histogram + Best/Worst |
-| `ui/image_viewer.py` | Preview-Viewer (volle Auflösung, `zoom_in`/`zoom_out`/`zoom_to`/`center_image`/`reset_view`, `zoom_changed`-Signal) |
-| `ui/preview_dialog.py` | Vollbild-Preview |
+| `main.py` | Entry point, `QApplication` + `MainWindow` (UI is lazily imported – worker processes don't load PyQt) |
+| `config.py` | **All** tuning parameters (`AnalysisConfig`) |
+| `models.py` | Data classes (`BlockMetrics`, `ImageQualityMetrics`), shared `status_text` |
+| `imageio.py` | **Ingestion** (Phase 1): loader dispatch (cv2 / pillow-heif / rawpy), EXIF parsing, 16-bit/RAW normalisation, MD5, reduced decode |
+| `metrics.py` | Downsampling, block sharpness (single Laplacian pass), motion-blur features, **feature density** (Harris) + **clip stats** (Phase 2), **exposure / WB** (Kelvin, EV, white-point gain, Phase 3), global info metrics |
+| `scoring.py` | Bokeh-aware, **absolute** scoring (resolution-normalised) |
+| `workers.py` | Multiprocessing pipeline, duplicate marking, slow-shutter flag, **set consistency: exposure / WB / ISO / aperture** (Phase 3), progress callback, stop event |
+| `utils.py` | Thumbnails, file collection |
+| `ui/main_window.py` | Main window, worker QThread, actions, `build_export_rows`, CSV export, stats wiring |
+| `ui/table_model.py` | Results table (colour coding, status via `status_text`) |
+| `ui/stats_panel.py` | **Batch statistics** (Phase 2): counts + 24-bin histogram + best/worst |
+| `ui/image_viewer.py` | Preview viewer (full resolution, `zoom_in` / `zoom_out` / `zoom_to` / `center_image` / `reset_view`, `zoom_changed` signal) |
+| `ui/preview_dialog.py` | Full-screen preview |
 
-## Wie das Scoring funktioniert
+## How the Scoring Works
 
-1. Das Bild wird auf `analysis_dim` (Default **2048 px** lange Kante)
-   heruntergerechnet.
-2. Auf dem Graustufenbild wird **einmal** der Laplacian berechnet.
-3. Das Bild wird in ein `grid_size × grid_size`-Raster (Default 8×8 =
-   64 Blöcke) aufgeteilt; pro Block wird die **Laplacian-Varianz**
-   gemessen (Scharfe = hohe Varianz).
-4. **Subject Sharpness** = Mittelwert der scharfsten
-   `topk_fraction`-Blöcke (Default: Top 10 % ≈ 6 Blöcke) – so trägt
-   nur das scharfe Objekt zum Score bei, nicht der Bokeh-Hintergrund.
-5. Der Wert wird auf die Referenzauflösung normisiert
-   (Laplacian-Varianz skaliert ~ mit dem Quadrat der Auflösung) und
-   log-linear auf 0…1 abgebildet:
-   - `blur_floor` (Default 30)  → Score 0.0
-   - `sharp_ref` (Default 600)  → Score 1.0
-6. Leichter Noise-Penalty (Sensor-Rauschen ist Hochfrequenz und würde
-   sonst als „Scharfe" zählen).
-7. **Motion-Blur-Check (Kamerawackeln)** – zwei sich ergänzende,
-   richtungs-agnostische Hinweise, die **beide** zutreffen müssen (AND):
-   - `delta_conc` (spektral): Bewegungsunschärfe streicht die
-     multi-richtigen Feindetails aus dem HF-Winkelprofil, während die
-     texturalignierte Richtung bleibt → das HF-Band wird
-     *konzentrierter* als das TF-Band.
-   - `lag_aniso` (spatial): in der verwaschenen Richtung gehen
-     HF-Energie in den scharfsten Blöcken verloren.
-   Scharfe, stark texturierte Bilder (Stroh, Rinde, Schilf) können in
-   *einem* Extrem liegen (Stroh → hohe `delta_conc`; Schilf → niedrige
-   `lag_aniso`), aber nie in beiden – auf 4.241 scharfen Referenzbildern
-   (Galli Colmap/Interior/Exterior + EichenHain) kalibriert:
-   Nur beides zusammen → Penalty (bis zu `motion_blur_penalty_max`
+1. The image is downsampled to `analysis_dim` (default **2048 px** longest side).
+2. A **single** Laplacian pass is computed on the greyscale image.
+3. The image is split into a `grid_size × grid_size` grid (default 8×8 =
+   64 blocks); the **Laplacian variance** is measured per block
+   (sharp = high variance).
+4. **Subject sharpness** = mean of the sharpest `topk_fraction` blocks
+   (default: top 10 % ≈ 6 blocks) – only the sharp subject contributes
+   to the score, not the bokeh background.
+5. The value is normalised to the reference resolution
+   (Laplacian variance scales ~ with the square of the resolution) and
+   mapped log-linearly to 0…1:
+   - `blur_floor` (default 30)  → score 0.0
+   - `sharp_ref` (default 600)  → score 1.0
+6. Light noise penalty (sensor noise is high-frequency and would
+   otherwise count as "sharpness").
+7. **Motion-blur check (camera shake)** – two complementary,
+   direction-agnostic indicators, **both** must be present (AND):
+   - `delta_conc` (spectral): motion blur smears multi-directional
+     fine detail out of the HF angle profile while the texture-aligned
+     direction remains → the HF band becomes *more concentrated* than
+     the TF band.
+   - `lag_aniso` (spatial): in the blur direction, HF energy is lost
+     in the sharpest blocks.
+   Sharp, strongly textured images (straw, bark, reeds) can sit at one
+   extreme (straw → high `delta_conc`; reeds → low `lag_aniso`) but
+   never at both – calibrated on 4,241 sharp reference images
+   (Galli Colmap/Interior/Exterior + EichenHain):
+   only both together → penalty (up to `motion_blur_penalty_max`
    = 95 %).
-8. Score < `blur_threshold` (Default 0.5) → **⚠️ Blurry**.
-   - **Soft (Motion)** 🟡 – derselbe Motion-Blur-Detektor meldet *echte*
-     (beide Hinweise, AND) aber noch zu schwache Unschärfe, um den Score
-     unter `blur_threshold` zu drücken → das Bild würde sonst als „scharf“
-     durchgehen. Genau die „minimal verrissen“-Aufnahmen. **Warnung (🟡),
-     keine Ablehnung.** Schwellwert `soft_mb_floor` (Default **0.20**),
-     Schalter `motion_blur_soft_check` (Default an).
-9. Zusätzlich: Belichtungs-Check (Helligkeit/Kontrast) →
-   **⚠️ Exposure**
+8. Score < `blur_threshold` (default 0.5) → **⚠️ Blurry**.
+   - **Soft (Motion)** 🟡 – the same motion-blur detector reports *genuine*
+     (both indicators, AND) but not-yet-strong-enough blur to push the
+     score below `blur_threshold` → the image would otherwise pass as
+     "sharp". These are the "slightly missed" shots. **Warning (🟡),
+     not a rejection.** Threshold `soft_mb_floor` (default **0.20**),
+     toggle `motion_blur_soft_check` (default on).
+9. Additionally: exposure check (brightness / contrast) →
+   **⚠️ Exposure**.
 
-Wichtig: Der Score ist **absolut** und batch-unabhängig – dasselbe Bild
-bekommt in jedem Lauf denselben Wert (anders als bei relativer
-Batch-Normalisierung).
+Important: the score is **absolute** and batch-independent – the same image
+gets the same value in every run (unlike relative batch normalisation).
 
-## Photogrammetrie-Checks (SfM-Readiness)
+## Photogrammetry Checks (SfM-Readiness)
 
-Scharfe Bilder sind nicht automatisch gute SfM-Eingaben. Die Checks in
-Phase 2 ergänzen den Scharfe-Score um die typischen „no features found“/
-„overexposed“-Fehlerquellen unabhängig vom Scharfe-Score:
+Sharp images are not automatically good SfM input. The Phase 2 checks
+complement the sharpness score with typical "no features found" /
+"overexposed" failure modes – independent of the sharpness score:
 
-- **Feature-Dichte** – Anzahl nutzbbarer Harris-Kanten pro 1 000 Pixel
-  (absolutes Antwort-Schwellen `HARRIS_FEATURE_THRESHOLD`). Ein scharfes
-  Bild von Himmel, glatter Wand, Wasser, Schnee oder Glas hat fast keine
-  matchbare Struktur und wird als **Few Features** markiert
-  (`min_feature_density`, Default **2.0** / 1k px).
-- **Clipping** – Anteil der Pixel mit verlorenem Informationsgehalt:
-  - Highlights (ein Kanal ≥ 253) > `max_clip_high` (**2 %**) → Flag.
-    Überbelichtete Drone-Backlight-Aufnahmen sind der Klassiker.
-  - Schatten (alle Kanäle ≤ 2) > `max_clip_low` (**25 %**) → Flag. Die
-    höhere Grenze verhindert False-Positives bei dunklen Materialien
-    (Reet, Rinde, Nacht), die 10–20 % „crushed shadow“ ohne
-    Unterbelichtung tragen.
-- **Duplikate** – gleiche Datei (MD5) kommt mehrfach im Batch vor → jede
-  Datei nach der ersten (pfad-sortiert) zeigt **Duplicate** + Original-Pfad.
-- **Langzeiter-Bestätigung** – EXIF-Verschlusszeit länger als
-  `1 / Brennweite` (z. B. 1/15 bei 24 mm) wird im Status als „· slow
-  shutter“ ergänzt, wenn das Bild ohnehin unscharf ist. Kein eigenes
-  Verdict (Stativ + 1/8 s ist in Ordnung) – nur eine zusätzliche Evidenz.
+- **Feature density** – count of usable Harris edges per 1 000 pixels
+  (absolute response threshold `HARRIS_FEATURE_THRESHOLD`). A sharp image
+  of sky, smooth wall, water, snow, or glass has almost no matchable
+  structure and is flagged as **Few Features**
+  (`min_feature_density`, default **2.0** / 1k px).
+- **Clipping** – fraction of pixels with lost information:
+  - Highlights (any channel ≥ 253) > `max_clip_high` (**2 %**) → flag.
+    Overexposed drone backlight shots are the classic case.
+  - Shadows (all channels ≤ 2) > `max_clip_low` (**25 %**) → flag. The
+    higher threshold prevents false positives on dark materials
+    (thatch, bark, night scenes) that naturally carry 10–20 %
+    "crushed shadow" without underexposure.
+- **Duplicates** – identical file (MD5) appears multiple times in the
+  batch → every file after the first (path-sorted) shows **Duplicate**
+  + original path.
+- **Slow-shutter flag** – EXIF shutter speed longer than
+  `1 / focal_length` (e.g. 1/15 at 24 mm) is appended as "· slow
+  shutter" in the status if the image is already flagged as blurry.
+  No separate verdict (tripod + 1/8 s is fine) – just additional evidence.
 
-Alle vier Flags fließen in die **Status-Spalte** (`models.status_text`):
+All four flags flow into the **status column** (`models.status_text`):
 ```
 🟢 Sharp · 🔴 Blurry (+ Clipping / Few Features / Duplicate / · slow shutter) · 🟡 Soft (Motion) / …
 ```
 
-## Belichtung & Weißabgleich (Phase 3)
+## Exposure & White Balance (Phase 3)
 
-Der häufigste echte SfM-Pain ist selten ein einzelnes „zu dunkles" Bild –
-sondern ein **Satz**, dessen Bilder **nicht übereinstimmen**:
-Auto-Belichtung / Auto-WB driftet zwischen überlappenden Aufnahmen →
-Fugen, Farbsprünge, Photometric-Match-Failures. Deshalb wird pro Bild die
-**Rohsignatur** gemessen und das *Outlier-Flag* vergleicht jedes Bild mit
-dem robusten **Set-Median** (Median statt Mittelwert – unempfindlich gegen
-die Ausreißer, die man ohnehin finden will).
+The most common real-world SfM issue is rarely a single "too dark" image –
+it's a **set** whose images **don't agree**:
+auto-exposure / auto-WB drifts between overlapping shots → seams, colour
+jumps, photometric match failures. For each image the **raw signature**
+is measured and the *outlier flag* compares it against the robust
+**set median** (median instead of mean – resilient to the very outliers
+you're trying to find).
 
-Alle fünf Checks sind **Warnungen (🟡)**, keine harten Ablehnungen – und
-die **Rohwerte Ihre eigenen Sets kalibrieren können.
+All five checks are **warnings (🟡)**, not hard rejections – and the
+**raw values are always exported** (CSV + info panel) so you can
+calibrate thresholds against your own sets.
 
-- **Expo drift** – Belichtungsdrift relativ zum Set.
-  - Primär: **EXIF-EV (EV100, exakt)** mit `EV = log2(N² / (t · ISO/100))`.
-    Gleiche Szene ⇒ gleiches EV100, Drift ist damit ein direkter
-    Auto-Exposure-Signal. Braucht ≥ 3 Bilder mit EXIF.
-  - Fallback (ohne EXIF): Luminanz-Median vs. Set-Median.
-  - Schwellen: `exposure_outlier_ev` (**0.5** Stops) /
-    `exposure_outlier_luma` (**0.25** relativ).
-- **WB drift** – Weißabgleichsdrift via **White-Point-Gain-Vektor**
-  (R/G, B/G aus dem 95.-Perzentil je Kanal – robust gegen einzelne
-  überbelichtete Highlights). Euklidische Abweichung vom Set-Median >
-  `wb_gain_dev_max` (**0.15**).
-  - **Kelvin-Schätzung** (CIE-1931-Chromatizität + McCamy) dient als
-    *Richtungskontrolle* – eine Näherung, kein Labor-Wert. Genau genug
-    für Konsistenz, nicht für absolute Farbtemperatur.
-- **Flat** – „used" Tonspanne (Luminanz p95−p5) unter
-  `min_dynamic_range` (**55**) → ausgewaschen.
-- **Hi-ISO** – ISO mehr als `iso_dev_stops_max` (**2.0** Stops) über dem
-  Set-Median (Rauschen + Drift).
-- **Aperture drift** – Blende mehr als `aperture_dev_stops_max` (**0.5**
-  Stop) vom Set-Median (Schärfentiefe-Änderung → Fokus-/Bokeh-Mismatch).
+- **Expo drift** – exposure drift relative to the set.
+  - Primary: **EXIF EV (EV100, exact)** via `EV = log2(N² / (t · ISO/100))`.
+    Same scene ⇒ same EV100, so drift is a direct auto-exposure signal.
+    Requires ≥ 3 images with EXIF.
+  - Fallback (no EXIF): luminance median vs. set median.
+  - Thresholds: `exposure_outlier_ev` (**0.5** stops) /
+    `exposure_outlier_luma` (**0.25** relative).
+- **WB drift** – white-balance drift via **white-point gain vector**
+  (R/G, B/G from the 95th percentile per channel – robust against
+  individual overexposed highlights). Euclidean deviation from set
+  median > `wb_gain_dev_max` (**0.15**).
+  - **Kelvin estimate** (CIE-1931 chromaticity + McCamy) serves as a
+    *direction check* – an approximation, not a lab value. Accurate
+    enough for consistency, not for absolute colour temperature.
+- **Flat** – "used" tonal range (luminance p95−p5) below
+  `min_dynamic_range` (**55**) → washed out.
+- **Hi-ISO** – ISO more than `iso_dev_stops_max` (**2.0** stops) above
+  the set median (noise + drift).
+- **Aperture drift** – aperture more than `aperture_dev_stops_max` (**0.5**
+  stop) from the set median (depth-of-field change → focus / bokeh mismatch).
 
-Alle Toggles + Schwellen stehen in [`config.py`](config.py):
+All toggles + thresholds are in [`config.py`](config.py):
 `exposure_consistency`, `wb_consistency`, `low_dynamic_range_check`,
 `iso_consistency`, `aperture_consistency`.
 
-## Kalibrierung (gegen Metashape)
+## Calibration
 
-Alle Werte stehen in [`config.py`](config.py) (`DEFAULT_CONFIG`).
-Empfohlenes Vorgehen:
+All values are in [`config.py`](config.py) (`DEFAULT_CONFIG`).
+Recommended workflow:
 
-1. Einen Ordner mit 20–30 eigenen Fotos prüfen, die Sie selbst als
-   scharf/unscharf einstufen (oder Metashapes Ergebnis als Referenz
-   nehmen).
-2. Die Rohwerte „Subject Sharpness (norm.)" im Info-Panel bzw. in der
-   CSV-Spalte `peak_sharpness` vergleichen.
-3. `blur_floor` / `sharp_ref` so setzen, dass Ihre Grenzen stimmen:
-   - Werte scharfer Fotos liegen typisch bei **hundreds…thousands**
-     (auflösungs-normalisiert).
-   - Werte sicher unscharfer Fotos: **< 10–30**.
-4. `blur_threshold` ist die Score-Grenze für das ⚠️-Flag.
-5. `grid_size` (6/8/10) und `topk_fraction` (0.05–0.2) nur grob
-   anpassen – sie ändern die Stabilität, nicht die Skala.
-6. **Motion-Blur-Schwellen** (`mb_*`): gelten nur, wenn Ihr Material
-   viel stark gerichtete Textur hat (Stroh, Rinde, Schilf). Die
-   kalibrierten Defaults (verwackelt: `delta_conc` 23 % / `lag_aniso`
-   0.14…0.15; nächstes scharfes Bild: 18 % / 0.21 – die Ramps liegen
-   in dieser Lücke) sind:
+1. Run a folder of 20–30 of your own photos that you've rated as
+   sharp / blurry yourself.
+2. Compare the raw "Subject Sharpness (norm.)" values in the info
+   panel or the `peak_sharpness` CSV column.
+3. Set `blur_floor` / `sharp_ref` so your boundaries are right:
+   - Sharp photos typically sit in the **hundreds…thousands**
+     (resolution-normalised).
+   - Definitely blurry photos: **< 10–30**.
+4. `blur_threshold` is the score boundary for the ⚠️ flag.
+5. `grid_size` (6/8/10) and `topk_fraction` (0.05–0.2) are coarse
+   adjustments only – they change stability, not the scale.
+6. **Motion-blur thresholds** (`mb_*`): only relevant if your material
+   has lots of strongly directional texture (straw, bark, reeds). The
+   calibrated defaults (blurry: `delta_conc` 23 % / `lag_aniso`
+   0.14…0.15; next sharpest image: 18 % / 0.21 – the ramps sit in
+   that gap) are:
 
-   | Parameter | Default | Bedeutung |
+   | Parameter | Default | Meaning |
    |---|---|---|
-   | `mb_delta_good` | 0.15 | darunter: keine spektrale Evidenz |
-   | `mb_delta_bad` | 0.20 | darüber: volle spektrale Evidenz |
-   | `mb_lag_good` | 0.21 | darüber: keine richtungs-Evidenz |
-   | `mb_lag_bad` | 0.10 | darunter: volle richtungs-Evidenz |
-   | `motion_blur_penalty_max` | 0.95 | max. Score-Reduktion (× 1 − Wert) |
-   | `motion_blur_soft_check` | `True` | Schalter für die „Soft (Motion)“-Warnung |
-   | `soft_mb_floor` | 0.20 | `mb_penalty` ≥ Wert → **Soft (Motion)** 🟡 (Warnung, keine Ablehnung) |
+   | `mb_delta_good` | 0.15 | below: no spectral evidence |
+   | `mb_delta_bad` | 0.20 | above: full spectral evidence |
+   | `mb_lag_good` | 0.21 | above: no direction evidence |
+   | `mb_lag_bad` | 0.10 | below: full direction evidence |
+   | `motion_blur_penalty_max` | 0.95 | max. score reduction (× 1 − value) |
+   | `motion_blur_soft_check` | `True` | toggle for the "Soft (Motion)" warning |
+   | `soft_mb_floor` | 0.20 | `mb_penalty` ≥ value → **Soft (Motion)** 🟡 (warning, not rejection) |
 
-   Der Penalty greift nur im **AND** beider Hinweise (Produkt der
-   beiden Evidenz-Anteile). Rohwerte (`mb_delta_conc`, `mb_lag_aniso`)
-   stehen im Info-Panel und in den CSV-Spalten – damit lassen sich
-   eigene Schwellen gegen Metashape kalibrieren.
+   The penalty only applies when **both** indicators fire (product of
+   the two evidence fractions). Raw values (`mb_delta_conc`,
+   `mb_lag_aniso`) are in the info panel and CSV columns – use them
+   to calibrate your own thresholds.
 
-## Performance-Notizen
+## Performance Notes
 
-- 1 Laplacian-Pass + 64 günstige Varianz-Reduktionen pro Bild
-  (statt 64 Kernel-Pässen).
-- Analyse auf 2048 px statt 4096 px → ~4× weniger Pixelarbeit in den
-  globalen Metriken (Sobel, Canny, HSV).
-- Worker lesen direkt von Platte (kein RAM-Cache), Pfade mit
-  Umlauten/Sonderzeichen werden korrekt decodiert
+- 1 Laplacian pass + 64 cheap variance reductions per image
+  (instead of 64 kernel passes).
+- Analysis at 2048 px instead of 4096 px → ~4× less pixel work in the
+  global metrics (Sobel, Canny, HSV).
+- Workers read directly from disk (no RAM cache); paths with
+  umlauts / special characters are decoded correctly
   (`np.fromfile` + `cv2.imdecode`).
 
-## Abhängigkeiten
+## Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**Optionale Format-Backends** (Phase 1 – ohne sie laufen JPEG/PNG/TIFF
-weiterhin, die betroffenen Formate zeigen nur einen freundlichen
-„install …“-Hinweis statt einer Crash):
+**Optional format backends** (Phase 1 – without them JPEG/PNG/TIFF
+still work; the affected formats show a friendly "install …" hint
+instead of crashing):
 
 ```bash
 pip install rawpy pillow-heif
 ```
 
-| Backend | Formate | Effekt |
+| Backend | Formats | Effect |
 |---|---|---|
-| `rawpy` | `.dng .cr2 .nef .arw .orf …` | RAW-Decode + EXIF aus `raw.other`/`raw.lens` |
-| `pillow-heif` | `.heic .heif` | iPhone/Android-Still-Decode |
+| `rawpy` | `.dng .cr2 .nef .arw .orf …` | RAW decode + EXIF from `raw.other` / `raw.lens` |
+| `pillow-heif` | `.heic .heif` | iPhone/Android still decode |
 
-## Repo-Struktur
+## License & Version History
 
-| Ordner | Inhalt |
-|---|---|
-| `tools/` | Standalone-Kalibrierungs-/Diagnose-Skripte (nicht Teil der App) |
-| `scratch/` | Lokale Kalibrierungs-Dumps & Debug-PNGs (nicht versioniert) |
-| `legacy/` | Alte monolithische Version, nur noch zur Referenz |
-
-## Lizenz & Versionshistorie
-
-MIT – siehe [`LICENSE`](LICENSE). Änderungen in [`CHANGELOG.md`](CHANGELOG.md).
+MIT – see [`LICENSE`](LICENSE). Changes in [`CHANGELOG.md`](CHANGELOG.md).
