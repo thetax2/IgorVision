@@ -102,7 +102,7 @@ referenzieren – wichtig für die Produktseite._
      keine Ablehnung.** Schwellwert `soft_mb_floor` (Default **0.20**),
      Schalter `motion_blur_soft_check` (Default an).
 9. Zusätzlich: Belichtungs-Check (Helligkeit/Kontrast) →
-   **⚠️ Exposure** – wie bei Metashape.
+   **⚠️ Exposure**
 
 Wichtig: Der Score ist **absolut** und batch-unabhängig – dasselbe Bild
 bekommt in jedem Lauf denselben Wert (anders als bei relativer
@@ -112,7 +112,7 @@ Batch-Normalisierung).
 
 Scharfe Bilder sind nicht automatisch gute SfM-Eingaben. Die Checks in
 Phase 2 ergänzen den Scharfe-Score um die typischen „no features found“/
-„overexposed“-Fehlerquellen von Metashape – unabhängig vom Scharfe-Score:
+„overexposed“-Fehlerquellen unabhängig vom Scharfe-Score:
 
 - **Feature-Dichte** – Anzahl nutzbbarer Harris-Kanten pro 1 000 Pixel
   (absolutes Antwort-Schwellen `HARRIS_FEATURE_THRESHOLD`). Ein scharfes
@@ -149,8 +149,7 @@ dem robusten **Set-Median** (Median statt Mittelwert – unempfindlich gegen
 die Ausreißer, die man ohnehin finden will).
 
 Alle fünf Checks sind **Warnungen (🟡)**, keine harten Ablehnungen – und
-die **Rohwerte werden immer exportiert** (CSV + Info-Panel), damit Sie die
-Schwellen gegen Metashape / Ihre eigenen Sets kalibrieren können.
+die **Rohwerte Ihre eigenen Sets kalibrieren können.
 
 - **Expo drift** – Belichtungsdrift relativ zum Set.
   - Primär: **EXIF-EV (EV100, exakt)** mit `EV = log2(N² / (t · ISO/100))`.
