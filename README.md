@@ -1,6 +1,7 @@
-# IgorVision – Image Quality Inspector
+# IGORvision — Image Geometry Observation & Reconstruction – Toolkit
 
-Bokeh-aware, modular image quality checker for photogrammetry workflows.
+
+Vision Module - Bokeh-aware, modular image quality checker for photogrammetry workflows.
 Detects blurry images, poor exposure, and misaligned sets – while
 correctly classifying images with a **sharp subject and bokeh
 background** as sharp.
