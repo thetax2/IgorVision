@@ -5,6 +5,71 @@ All notable changes to IgorVision. Format loosely follows
 
 ## Unreleased
 
+### RealityScan command centre – node-based pipeline editor (new tab)
+
+- **New top-level tab “RealityScan”** (right of Metashape): a
+  node-based pipeline editor (Blender / ComfyUI style) for the
+  RealityScan / RealityCapture CLI.
+- **Engine** (`tools/realityscan_engine.py`, Qt-free, headless-testable):
+  - Registry of **170+ CLI commands** with parameter specs, grouped by
+    category (Project, Images, Alignment, Reconstruction, Model,
+    Classification, Settings).
+  - Pipeline model = ordered command **nodes** + free **`%VARIABLES%`**.
+    Execution order is **left → right** (node x-position).
+  - `build_args` (flat CLI list for direct execution), `build_batch`
+    (portable `.bat` artifact), JSON save / load, **`.bat` import**
+    (parses `set` variables + the chained command line), and presets
+    (incl. *HighDetail RAW + Distances*).
+- **Runner** (`tools/realityscan_worker.py`): executes the pipeline
+  **directly** against the exe via `QProcess` – live stdout/stderr,
+  clean **abort**, **exit code**, and optional `writeProgress` file
+  polling for a progress bar. A `.bat` is only ever an *export*, never
+  the execution path.
+- **Tab UI** (`ui/realityscan_tab.py`): node canvas
+  (`QGraphicsProxyWidget` nodes with editable parameters + in/out ports,
+  bezier links, drag-to-link, double-click to unlink), searchable command
+  palette, free variables table, exe browser, GUI / headless + `-quit`,
+  presets, import `.bat`, save / open (JSON), export `.bat`, Run / Abort,
+  live log + progress.
+  - **Node interaction:** drag a node by its body / title bar to reposition
+    it (dragging is suppressed over editable fields and the enabled
+    checkbox, which stay clickable); wheel-zoom; *Fit view*.
+  - **Palette → canvas drag & drop:** drag a command from the palette onto
+    the canvas to create a node at that spot (the palette drags the command
+    name as `text/plain` via a `QListWidget` subclass); double-click still
+    works as a shortcut.
+  - Palette uses an explicit dark style (the app theme does not cover
+    `QListWidget`).
+  - **Info / Paths tab group** (bottom-right, replaces the flat
+    “Variables” panel): the *Info* tab live-documents the command
+    currently selected in the palette — category, what it produces /
+    consumes, description, and a parameter table with type + required /
+    optional; the *Paths* tab holds the pipeline variables
+    (`%NAME%` placeholders such as `PROJECT_FILE`, `IMAGE_FOLDER`,
+    `DISTANCE_FOLDER`, `DISTANCE_FILE1`) with Add / Remove. Both are
+    explicitly dark-styled (`QTextBrowser` + table), which the app theme
+    does not cover.
+  - **Middle-mouse pan:** hold the middle mouse button and drag to pan
+    the canvas (content follows the cursor); the wheel still zooms.
+  - **Ghosting / smear fixed:** the connection line and the pending
+    (rubber-band) line reused the previous `QPainterPath` and appended a
+    new cubic sub-path on every mouse-move / node-move – producing a fan
+    of trailing curves. Both now build a fresh `QPainterPath()` per
+    update (verified: path element count stays constant while dragging).
+- **PyQt5 notes (this build):**
+  - `QVBoxLayout(QGraphicsWidget)` and the new
+    `QGraphicsProxyWidget(widget)` ctor are rejected → nodes use
+    `QGraphicsProxyWidget()` + `setWidget()`.
+  - `itemAt(pos)` requires an explicit device transform →
+    `itemAt(pos, QTransform())`.
+  - `QGraphicsItem.deleteLater()` does not exist → `removeItem()` +
+    dropping the reference.
+  - Double-click events are not reliably delivered to scene items →
+    link removal is hit-tested in the view (`mouseDoubleClickEvent`).
+  - Initial view: `fit()` is guarded against a degenerate viewport and
+    never zooms out below 50 % – long pipelines start at 100 % centred
+    on the first node ("Fit view" stays an explicit button).
+
 ### Tab structure – Overlap promoted to a top-level tab
 
 - **Overlap is now a top-level tab** (`ui/main_window.py`): the

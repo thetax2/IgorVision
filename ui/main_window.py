@@ -57,6 +57,7 @@ from .compare_tab import CompareTab
 from .rename_tab import RenameTab
 from .sort_tab import SortTab
 from .metashape_tab import MetashapeTab
+from .realityscan_tab import RealityScanTab
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,7 @@ class MainWindow(QMainWindow):
         self._top_tabs.addTab("Rename")
         self._top_tabs.addTab("Sort")
         self._top_tabs.addTab("Metashape")
+        self._top_tabs.addTab("RealityScan")
 
         self._main_stack = QStackedWidget()
 
@@ -463,6 +465,7 @@ class MainWindow(QMainWindow):
         self._main_stack.addWidget(RenameTab())
         self._main_stack.addWidget(SortTab())
         self._main_stack.addWidget(MetashapeTab())
+        self._main_stack.addWidget(RealityScanTab())
 
         self._top_tabs.currentChanged.connect(self._on_top_tab_changed)
         layout.addWidget(self._top_tabs)

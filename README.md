@@ -52,7 +52,7 @@ python main.py
 
 ## File Tools (IGOR integration)
 
-In addition to the quality analysis, IgorVision bundles four file tools
+In addition to the quality analysis, IgorVision bundles five file tools
 (integrated from the IGOR project) as top-level tabs:
 
 | Tab | What it does |
@@ -61,6 +61,7 @@ In addition to the quality analysis, IgorVision bundles four file tools
 | **Rename** | Renames RAW files to match their JPG counterparts by camera base ID (`image0001.cr3` + `image0001_35mm_UpperPart.jpg` → `image0001_35mm_UpperPart.cr3`). Analyze (preview) + Execute (copy to target), dry-run and overwrite options. |
 | **Sort** | Sorts images of a Reality-Capture project into per-component folders based on `.imagelist` files (copy or move). |
 | **Metashape** | Phase 1: reads `Image/Quality` from an Agisoft Metashape `.psx` project and removes JPGs below a threshold slider (trash / `_removed/` / delete). Phase 2: finds orphaned RAWs (no matching JPG) and moves them to the trash. |
+| **RealityScan** | **Command centre** – a node-based pipeline editor (Blender / ComfyUI style) for RealityScan / RealityCapture CLI. Add command nodes (170+ commands, grouped by category), edit their parameters, arrange them left → right (execution order), link them, and set free `%VARIABLES%`. Run directly against the exe (live log, abort, exit code, optional `writeProgress` polling) or export a portable `.bat`. Import existing `.bat` files, save / open pipelines as JSON, and load presets (e.g. *HighDetail RAW + Distances*). |
 
 ## Screenshots
 
@@ -90,6 +91,9 @@ _TODO: add 1–2 app screenshots (e.g. `docs/screenshot.png`) and reference them
 | `tools/rename_engine.py` | Rename data model (`RenameConfig`, `RenameMapping`) |
 | `tools/metashape_engine.py` | Metashape `.psx` quality reader + orphaned-RAW detection |
 | `tools/compare_worker.py` | QThread workers: Compare / Replan / Transfer / ExifTool-check |
+| `tools/realityscan_engine.py` | **RealityScan command centre engine** (Qt-free): CLI command registry, pipeline model (nodes + variables), variable resolution, `build_args` / `build_batch`, JSON (de)serialisation, `.bat` import, presets |
+| `tools/realityscan_worker.py` | `QProcess` runner for a pipeline: live stdout/stderr, abort, exit code, optional `writeProgress` file polling |
+| `ui/realityscan_tab.py` | **RealityScan tab** – node-graph editor (`QGraphicsProxyWidget` nodes, ports, bezier links, palette, variables table), run / abort / log, save / open / import / export |
 | `tools/rename_worker.py` | QThread worker: analyze + execute rename |
 | `tools/metashape_worker.py` | QThread worker: load / filter / cleanup |
 | `ui/compare_tab.py` | Compare tab (paths, rename, subfolders, results table, log) |
