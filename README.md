@@ -41,7 +41,7 @@ python main.py
 - Preview panel (zoom / Shift-scroll), double-click = full-screen dialog
 - "Move to Keep / Reject Folder", "Open in Explorer", CSV export
   (55 columns including all photogrammetry, exposure/WB, and EXIF fields)
-- **Theme**: darktable-inspired **dark theme** (default) and a light
+- **Theme**: dark theme (default) and a light
   variant – switch under *Settings → Dark/Light Theme* (persisted)
 - **Preferences** (*Settings → Preferences*): program-wide settings –
   CPU cores for the analysis and the **ExifTool** executable path
