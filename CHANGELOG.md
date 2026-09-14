@@ -5,6 +5,22 @@ All notable changes to IgorVision. Format loosely follows
 
 ## Unreleased
 
+### Tab structure – Overlap promoted to a top-level tab
+
+- **Overlap is now a top-level tab** (`ui/main_window.py`): the
+  sub-tab row inside the Quality page (Quality | Overlap) is gone.
+  Top-level tabs are now **Quality · Overlap · Compare · Rename ·
+  Sort · Metashape**.
+- Quality and Overlap **share one analysis page** (toolbar, stats,
+  preview, info tabs, settings panel) – only the left results view
+  swaps.  Selecting an Overlap row still shows the image in the
+  preview (keypoint visualisation included), and the settings panel
+  still follows the active tab (quality parameters vs. SIFT /
+  matching parameters).
+- Implemented with `QTabBar` + `QStackedWidget` (a widget cannot live
+  in two `QTabWidget` tabs at once); the tab bar reuses the existing
+  `QTabBar` styling in `styles.py` (flat, accent underline).
+
 ### Settings panel – live tuning of all config parameters
 
 - **New tab-aware settings panel** (`ui/settings_panel.py`) to the right

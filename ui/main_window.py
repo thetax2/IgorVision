@@ -33,8 +33,10 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSlider,
-    QTabWidget,
     QSplitter,
+    QStackedWidget,
+    QTabBar,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -251,12 +253,22 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- top-level tabs: Quality (IgorVision) + IGOR file tools ---
-        self._main_tabs = QTabWidget()
-        self._main_tabs.setDocumentMode(True)
+        # --- top-level tabs: Quality + Overlap (shared analysis view)
+        #     + IGOR file tools ---
+        self._top_tabs = QTabBar()
+        self._top_tabs.addTab("Quality")
+        self._top_tabs.addTab("Overlap")
+        self._top_tabs.addTab("Compare")
+        self._top_tabs.addTab("Rename")
+        self._top_tabs.addTab("Sort")
+        self._top_tabs.addTab("Metashape")
 
-        quality_page = QWidget()
-        page_layout = QVBoxLayout(quality_page)
+        self._main_stack = QStackedWidget()
+
+        # Quality and Overlap share one analysis page (toolbar, preview,
+        # stats, info, settings); only the left results view swaps.
+        analysis_page = QWidget()
+        page_layout = QVBoxLayout(analysis_page)
         page_layout.setContentsMargins(0, 0, 0, 0)
 
         # --- toolbar ---
@@ -302,12 +314,12 @@ class MainWindow(QMainWindow):
         # --- main splitter ---
         splitter = self._splitter = QSplitter(Qt.Horizontal)
 
-        # left: tabbed results (Quality + Overlap)
-        self._left_tabs = QTabWidget()
+        # left: stacked results views (Quality / Overlap)
+        self._left_stack = QStackedWidget()
 
-        # --- Tab 1: Quality (existing table + filters) ---
-        quality_tab = QWidget()
-        quality_layout = QVBoxLayout(quality_tab)
+        # --- view 1: Quality (table + filters) ---
+        quality_view = QWidget()
+        quality_layout = QVBoxLayout(quality_view)
         quality_layout.setContentsMargins(0, 0, 0, 0)
 
         self._table = QTableWidget()
@@ -329,11 +341,11 @@ class MainWindow(QMainWindow):
         filter_row.addWidget(self._btn_show_blurry)
         quality_layout.addLayout(filter_row)
 
-        self._left_tabs.addTab(quality_tab, "Quality")
+        self._left_stack.addWidget(quality_view)
 
-        # --- Tab 2: Overlap (capture order) ---
-        overlap_tab = QWidget()
-        overlap_layout = QVBoxLayout(overlap_tab)
+        # --- view 2: Overlap (capture order) ---
+        overlap_view = QWidget()
+        overlap_layout = QVBoxLayout(overlap_view)
         overlap_layout.setContentsMargins(0, 0, 0, 0)
 
         self._overlap_table = QTableWidget(0, 5)
@@ -353,10 +365,9 @@ class MainWindow(QMainWindow):
         self._overlap_table.setAlternatingRowColors(True)
         overlap_layout.addWidget(self._overlap_table)
 
-        self._left_tabs.addTab(overlap_tab, "Overlap")
-        self._left_tabs.currentChanged.connect(self._on_left_tab_changed)
+        self._left_stack.addWidget(overlap_view)
 
-        splitter.addWidget(self._left_tabs)
+        splitter.addWidget(self._left_stack)
 
         # right: preview column + settings panel (horizontal splitter)
         preview_col = QWidget()
@@ -446,13 +457,16 @@ class MainWindow(QMainWindow):
         # status bar
         self.statusBar().showMessage("Ready")
 
-        # --- register top-level tabs ---
-        self._main_tabs.addTab(quality_page, "Quality")
-        self._main_tabs.addTab(CompareTab(), "Compare")
-        self._main_tabs.addTab(RenameTab(), "Rename")
-        self._main_tabs.addTab(SortTab(), "Sort")
-        self._main_tabs.addTab(MetashapeTab(), "Metashape")
-        layout.addWidget(self._main_tabs, 1)
+        # --- register top-level pages: shared analysis + file tools ---
+        self._main_stack.addWidget(analysis_page)
+        self._main_stack.addWidget(CompareTab())
+        self._main_stack.addWidget(RenameTab())
+        self._main_stack.addWidget(SortTab())
+        self._main_stack.addWidget(MetashapeTab())
+
+        self._top_tabs.currentChanged.connect(self._on_top_tab_changed)
+        layout.addWidget(self._top_tabs)
+        layout.addWidget(self._main_stack, 1)
 
     # ==================================================================
     # menu / theme
@@ -1011,14 +1025,19 @@ class MainWindow(QMainWindow):
             self._viewer.zoom_to(25)
             self._update_info(r)
 
-    def _on_left_tab_changed(self, index: int) -> None:
-        """Switch the settings panel page to match the active tab.
+    def _on_top_tab_changed(self, index: int) -> None:
+        """Top-level tab switch.
 
-        Tab 0 (Quality) → quality config sliders; tab 1 (Overlap) →
-        SIFT / matching parameters.  The overlap table selection is
-        connected once in _connect_signals.
+        Tabs 0/1 (Quality / Overlap) share the analysis page: only the
+        left results view and the settings page (quality vs. SIFT)
+        swap.  Tabs 2+ are the standalone file tools.
         """
-        self._settings.set_page(index)
+        if index <= 1:
+            self._main_stack.setCurrentIndex(0)
+            self._left_stack.setCurrentIndex(index)
+            self._settings.set_page(index)
+        else:
+            self._main_stack.setCurrentIndex(index - 1)
 
     def _on_settings_changed(self, name: str, value) -> None:
         """React to live settings-panel changes (value already applied
