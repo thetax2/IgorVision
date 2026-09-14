@@ -61,7 +61,7 @@ In addition to the quality analysis, IgorVision bundles five file tools
 | **Rename** | Renames RAW files to match their JPG counterparts by camera base ID (`image0001.cr3` + `image0001_35mm_UpperPart.jpg` → `image0001_35mm_UpperPart.cr3`). Analyze (preview) + Execute (copy to target), dry-run and overwrite options. |
 | **Sort** | Sorts images of a Reality-Capture project into per-component folders based on `.imagelist` files (copy or move). |
 | **Metashape** | Phase 1: reads `Image/Quality` from an Agisoft Metashape `.psx` project and removes JPGs below a threshold slider (trash / `_removed/` / delete). Phase 2: finds orphaned RAWs (no matching JPG) and moves them to the trash. |
-| **RealityScan** | **Command centre** – a node-based pipeline editor (Blender / ComfyUI style) for RealityScan / RealityCapture CLI. Add command nodes (170+ commands, grouped by category), edit their parameters, arrange them left → right (execution order), link them, and set free `%VARIABLES%`. Run directly against the exe (live log, abort, exit code, optional `writeProgress` polling) or export a portable `.bat`. Import existing `.bat` files, save / open pipelines as JSON, and load presets (e.g. *HighDetail RAW + Distances*). |
+| **RealityScan** | **Command centre** – a node-based pipeline editor for RealityCapture CLI. Add command nodes (170+ commands, grouped by category), edit their parameters, arrange them left → right (execution order), link them, and set free `%VARIABLES%`. Run directly against the exe (live log, abort, exit code, optional `writeProgress` polling) or export a portable `.bat`. Import existing `.bat` files, save / open pipelines as JSON, and load presets (e.g. *HighDetail RAW + Distances*). |
 
 ## Screenshots
 
