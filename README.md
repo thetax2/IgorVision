@@ -346,5 +346,3 @@ pip install rawpy pillow-heif
 ## License & Version History
 
 AGPL-3.0 – see [`LICENSE`](LICENSE). Changes in [`CHANGELOG.md`](CHANGELOG.md).
-
-
