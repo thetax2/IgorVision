@@ -347,6 +347,4 @@ pip install rawpy pillow-heif
 
 AGPL-3.0 – see [`LICENSE`](LICENSE). Changes in [`CHANGELOG.md`](CHANGELOG.md).
 
-Versioning follows the `Backup/IgorVision_vX.Y.zip` scheme – small
-increments (v0.6 → v0.7), big jumps only at user-defined milestones.
-Current version: **v0.7**.
+
