@@ -3,6 +3,52 @@
 All notable changes to IgorVision. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/) – date + short entries.
 
+## v0.71 – 2026-09-15
+
+### Batch statistics panel – reworked as a range-selection tool
+
+- **Moved to the Quality tab** (left side, between the results table and
+  the quality-threshold slider) – no longer shown in the Overlap tab.
+- **Best/worst row removed** (unreadable in the dark theme).
+- **60-bin score histogram** (was 24) with a precise **0.00–1.00 axis**
+  (ticks every 0.10, labels every 0.25) and the threshold tick.
+- **Handle-based selection range** (built into the chart):
+  - drag the **left / right handle** → expand / shrink the range
+  - drag the **middle** → slide the whole range
+  - **double-click** → reset to 0.00–1.00 (clears the table selection)
+  - a compact **"Range" toggle** in the filter row (before "Show All")
+    activates / deactivates the handles (off → handles greyed out, range
+    reset, selection cleared)
+- **Live table selection** while dragging: every row whose score lies in
+  the range is selected – including rows hidden by the threshold filter –
+  so the existing "Move to Keep / Reject" buttons act on them directly.
+- **Range read-out** right next to the status counts
+  (e.g. `Range: 0.30 – 0.50 · 2 img`), resets to `0.00 – 1.00` after a
+  move / reset.
+- **Performance**: bulk selection triggers **zero** full-resolution
+  preview loads (signals blocked + multi-row selection skips the preview
+  slot), and the table viewport is explicitly repainted after the bulk
+  selection (previously the selection only appeared after an unrelated
+  repaint, e.g. scrolling).
+- **PyQt5 build fixes** (all verified by smoke tests):
+  - `QTableWidget.selectRow()` *replaces* the selection → additive
+    selection now goes through the selection model
+    (`ClearAndSelect` / `Select` + `Rows`)
+  - `selectedItems()` silently drops **hidden** rows → the selection is
+    read via `selectionModel().selectedRows(0)`
+  - stale selections "stuck" to new items after a table rebuild
+    (`setRowCount` + `sortItems`) → `set_results` now clears the
+    selection before rebuilding
+- The results table supports **multi-selection** (Ctrl/Shift + mouse) in
+  general now.
+
+### Preview canvas background follows the theme
+
+- The image-preview canvas was hard-coded light gray (240, 240, 240) and
+  glaring in the dark theme.  It now takes the design-system `bg` colour
+  (dark `#1e2023` / light `#f4f5f7`) and stays in sync when switching
+  themes (`Settings → Dark/Light Theme`).
+
 ## v0.7 – 2026-09-14
 
 ### Crash fix – standalone overlap scan (recursive repaint)

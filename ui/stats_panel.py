@@ -2,25 +2,32 @@
 IgorVision – Batch statistics panel
 =====================================
 
-Compact summary strip shown after each analysis:
+Compact summary shown below the results table (Quality tab only):
 
+* **score histogram** – 60-bin score distribution with a precise
+  0.00–1.00 axis (ticks every 0.10, labels every 0.25) and threshold
+  tick.  A **selection range** is built directly into the chart as two
+  thick handles (left / right) with a shaded area between them:
+
+  - drag the **right handle** → move the high edge (expand / shrink)
+  - drag the **left handle**  → move the low edge (expand / shrink)
+  - drag the **middle**       → slide the whole range left / right
+  - **double-click**          → reset the range to 0.00–1.00 (clears the
+    table selection)
+
+  While a handle is dragged the matching table rows are selected live.
 * **status counts** – sharp / blurry / exposure / clipping / few
   features / duplicates / errors
-* **score histogram** – 24 bins, colour-coded against the blur
-  threshold, with the threshold tick
-* **best / worst** image of the batch – click to select it in the table
 
 The panel is a plain widget (no analysis logic) and updates from
 ``set_results``.
 """
 from __future__ import annotations
 
-import os
-
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPainter
+from PyQt5.QtCore import QEvent, Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QPainter, QPen
 from PyQt5.QtWidgets import (
-    QGridLayout,
+    QHBoxLayout,
     QLabel,
     QVBoxLayout,
     QWidget,
@@ -28,54 +35,204 @@ from PyQt5.QtWidgets import (
 
 from models import ImageQualityMetrics
 
-_N_BINS = 24
+_N_BINS = 60
 
-# score-badges per bin position (below threshold → red, above → green,
-# middle → yellow), drawn as bar colours
 _C_RED = QColor(214, 94, 94)
 _C_YELLOW = QColor(232, 196, 84)
 _C_GREEN = QColor(110, 178, 106)
 _C_TEXT = QColor(90, 90, 90)
+_C_AXIS = QColor(180, 180, 180)
+_C_TICK = QColor(120, 120, 120)
+_C_THRESHOLD = QColor(240, 180, 60)
+_C_SEL_FILL = QColor(120, 170, 255, 48)
+_C_SEL_LINE = QColor(120, 170, 255)
+_C_HANDLE = QColor(110, 160, 250)
+_C_HANDLE_EDGE = QColor(210, 225, 255)
+_C_HANDLE_DOT = QColor(25, 35, 60)
 
 
 class _Histogram(QWidget):
-    """24-bin score histogram with threshold tick (pure QPainter)."""
+    """Score histogram (0.00–1.00) with a built-in handle selection range."""
+
+    range_changed = pyqtSignal(float, float)   # lo, hi (emitted while dragging)
+    selection_cleared = pyqtSignal()           # range reset to full
+
+    _M_TOP = 10
+    _M_BOTTOM = 22    # room for axis labels
+    _M_LEFT = 4
+    _M_RIGHT = 4
+    _HANDLE_HIT = 8   # px hit-zone around a handle edge
+    _MIN_RANGE = 0.01 # minimum selectable range width
+    _FULL = (0.0, 1.0)
 
     def __init__(self, threshold: float):
         super().__init__()
         self._threshold = threshold
         self._counts: list[float] = [0.0] * _N_BINS
-        self.setMinimumHeight(72)
+        self._sel: tuple[float, float] = (0.0, 1.0)
+        self._sel_count: int | None = None
+        self._drag: str | None = None   # 'lo' | 'hi' | 'move'
+        self._drag_offset: float = 0.0
+        self._enabled = True
+        self.setMinimumHeight(96)
         self.setSizePolicy(1, 0)  # stretch horizontally
 
+    # ------------------------------------------------------------------
+    # geometry helpers (plot area = score 0.0 … 1.0)
+    # ------------------------------------------------------------------
+
+    def _plot(self) -> tuple[int, int, int, int]:
+        return (self._M_LEFT, self.width() - self._M_RIGHT,
+                self._M_TOP, self.height() - self._M_BOTTOM)
+
+    def _score_at(self, x: float) -> float:
+        x0, x1, _, _ = self._plot()
+        if x1 <= x0:
+            return 0.0
+        return min(1.0, max(0.0, (x - x0) / (x1 - x0)))
+
+    def _x_at(self, score: float) -> float:
+        x0, x1, _, _ = self._plot()
+        return x0 + score * (x1 - x0)
+
+    def _hit_test(self, x: float) -> str:
+        lo, hi = self._sel
+        lx = self._x_at(lo)
+        rx = self._x_at(hi)
+        if abs(x - lx) <= self._HANDLE_HIT:
+            return "left"
+        if abs(x - rx) <= self._HANDLE_HIT:
+            return "right"
+        if lx < x < rx:
+            return "center"
+        return "outside"
+
+    # ------------------------------------------------------------------
+    # public API
+    # ------------------------------------------------------------------
+
     def set_scores(self, scores: list[float]) -> None:
-        if not scores:
+        if scores:
+            import numpy as np
+            counts, _ = np.histogram(scores, bins=_N_BINS, range=(0.0, 1.0))
+            self._counts = [float(c) for c in counts]
+        else:
             self._counts = [0.0] * _N_BINS
-            self.update()
-            return
-        import numpy as np
-        counts, _ = np.histogram(scores, bins=_N_BINS, range=(0.0, 1.0))
-        self._counts = [float(c) for c in counts]
         self.update()
 
     def set_threshold(self, threshold: float) -> None:
-        """Move the threshold tick + bar colouring (live config change)."""
+        """Move the threshold tick (live config change)."""
         self._threshold = threshold
         self.update()
+
+    def set_selection_count(self, n: int) -> None:
+        """Number of images inside the selected range (drawn as hint)."""
+        self._sel_count = n
+        self.update()
+
+    def reset_range(self) -> None:
+        """Reset the selection range to 0.00–1.00 (clears the selection)."""
+        self._sel = (0.0, 1.0)
+        self._sel_count = None
+        self.update()
+        self.selection_cleared.emit()
+
+    def has_selection(self) -> bool:
+        lo, hi = self._sel
+        return lo > 0.0 or hi < 1.0
+
+    def current_range(self) -> tuple[float, float]:
+        return self._sel
+
+    def set_enabled(self, on: bool) -> None:
+        """Enable / disable the handle selection interaction."""
+        self._enabled = on
+        if not on:
+            self._drag = None
+        self.update()
+
+    # ------------------------------------------------------------------
+    # mouse: drag handles / middle to select a range
+    # ------------------------------------------------------------------
+
+    def mousePressEvent(self, ev) -> None:  # noqa: N802
+        if not self._enabled:
+            return
+        if ev.type() == QEvent.MouseButtonDblClick:
+            self.reset_range()
+            return
+        if ev.button() != Qt.LeftButton:
+            return
+        x0, x1, _, _ = self._plot()
+        x = min(max(ev.x(), x0), x1)
+        hit = self._hit_test(x)
+        if hit == "left":
+            self._drag = "lo"
+        elif hit == "right":
+            self._drag = "hi"
+        elif hit == "center":
+            self._drag = "move"
+            self._drag_offset = self._score_at(x) - self._sel[0]
+
+    def mouseMoveEvent(self, ev) -> None:  # noqa: N802
+        if not self._enabled:
+            self.setCursor(Qt.ArrowCursor)
+            return
+        x0, x1, _, _ = self._plot()
+        x = min(max(ev.x(), x0), x1)
+        hit = self._hit_test(x)
+        if hit in ("left", "right"):
+            self.setCursor(Qt.SizeHorCursor)
+        elif hit == "center":
+            self.setCursor(Qt.ClosedHandCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+
+        if self._drag is None:
+            return
+        s = self._score_at(x)
+        lo, hi = self._sel
+        if self._drag == "lo":
+            new = (round(min(max(s, 0.0), hi - self._MIN_RANGE), 3), hi)
+        elif self._drag == "hi":
+            new = (lo, round(max(min(s, 1.0), lo + self._MIN_RANGE), 3))
+        else:  # move the whole range
+            width = hi - lo
+            new_lo = min(max(s - self._drag_offset, 0.0), 1.0 - width)
+            new = (round(new_lo, 3), round(new_lo + width, 3))
+        if new != self._sel:
+            self._sel = new
+            self.update()
+            self.range_changed.emit(new[0], new[1])
+
+    def mouseReleaseEvent(self, ev) -> None:  # noqa: N802
+        if ev.button() != Qt.LeftButton:
+            return
+        self._drag = None
+
+    # ------------------------------------------------------------------
+    # paint
+    # ------------------------------------------------------------------
 
     def paintEvent(self, _ev) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, False)
-        w, h = self.width(), self.height()
-        axis_y = h - 14
-        plot_h = axis_y - 6
-        bar_w = w / _N_BINS
+        x0, x1, y0, y1 = self._plot()
+        plot_w, plot_h = x1 - x0, y1 - y0
         max_c = max(self._counts) if any(self._counts) else 1.0
+        bin_w = plot_w / _N_BINS
+
+        lo, hi = self._sel
+        lx = int(self._x_at(lo))
+        rx = int(self._x_at(hi))
+
+        # selection fill (behind the bars)
+        p.fillRect(lx, y0, max(1, rx - lx), plot_h, _C_SEL_FILL)
 
         for i, c in enumerate(self._counts):
             if c <= 0:
                 continue
-            x0 = i * bar_w
+            bx = x0 + i * bin_w
             bh = max(2, int(plot_h * c / max_c))
             t = (i + 0.5) / _N_BINS
             if t < self._threshold - 0.15:
@@ -84,52 +241,91 @@ class _Histogram(QWidget):
                 col = _C_GREEN
             else:
                 col = _C_YELLOW
-            p.fillRect(int(x0) + 1, axis_y - bh, max(1, int(bar_w) - 2), bh, col)
+            p.fillRect(int(bx) + 1, y1 - bh, max(1, int(bin_w) - 2), bh, col)
+
+        # selection handles
+        self._draw_handle(p, lx, y0, y1)
+        self._draw_handle(p, rx, y0, y1)
 
         # baseline
-        p.setPen(QColor(180, 180, 180))
-        p.drawLine(0, axis_y, w, axis_y)
+        p.setPen(_C_AXIS)
+        p.drawLine(x0, y1, x1, y1)
 
-        # threshold tick
-        tx = int(self._threshold * w)
-        p.setPen(QColor(120, 120, 120))
-        p.drawLine(tx, 4, tx, axis_y)
+        # ticks every 0.10
+        p.setPen(_C_TICK)
+        for k in range(11):
+            tx = int(self._x_at(k / 10))
+            p.drawLine(tx, y1, tx, y1 - 4)
 
-        # labels
+        # labels every 0.25
         p.setPen(_C_TEXT)
-        p.drawText(0, axis_y + 2, 40, 12, Qt.AlignLeft, "0")
-        p.drawText(w - 20, axis_y + 2, 20, 12, Qt.AlignRight, "1")
+        for v in (0.0, 0.25, 0.5, 0.75, 1.0):
+            tx = int(self._x_at(v))
+            p.drawText(tx - 16, y1 + 2, 32, 16, Qt.AlignCenter, f"{v:.2f}")
+
+        # threshold tick (dashed, full height)
+        tx = int(self._x_at(self._threshold))
+        p.setPen(QPen(_C_THRESHOLD, 1, Qt.DashLine))
+        p.drawLine(tx, y0, tx, y1)
+
+        # range hint (top right)
+        hint = f"{lo:.2f} – {hi:.2f}"
+        if self._sel_count is not None:
+            hint += f"  ·  {self._sel_count} img"
+        p.setPen(_C_SEL_LINE)
+        p.drawText(x1, y0 - 2, 220, 14, Qt.AlignRight, hint)
+
         p.end()
+
+    def _draw_handle(self, p: QPainter, cx: int, y0: int, y1: int) -> None:
+        w = 5
+        x = cx - w // 2
+        fill = _C_HANDLE if self._enabled else QColor(90, 95, 105)
+        edge = _C_HANDLE_EDGE if self._enabled else QColor(125, 130, 140)
+        p.fillRect(x, y0, w, y1 - y0, fill)
+        p.setPen(QPen(edge, 1))
+        p.drawRect(x, y0, w, y1 - y0)
+        if self._enabled:
+            p.setPen(QPen(_C_HANDLE_DOT, 1))
+            mid_y = (y0 + y1) // 2
+            for dy in (-6, 0, 6):
+                p.drawPoint(cx, mid_y + dy)
 
 
 class StatsPanel(QWidget):
-    """Batch summary: counts + histogram + best/worst (clickable)."""
+    """Batch summary: score histogram (handle selection) + status counts."""
 
-    select_requested = pyqtSignal(str)  # image path
+    range_changed = pyqtSignal(float, float)    # score range [lo, hi]
+    selection_cleared = pyqtSignal()
 
     def __init__(self, threshold: float = 0.5, parent: QWidget | None = None):
         super().__init__(parent)
-        self._threshold = threshold
+        self._sel_count: int | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
 
-        self._counts_label = QLabel("No results yet")
-        self._counts_label.setStyleSheet("padding: 2px;")
-        layout.addWidget(self._counts_label)
-
+        # diagram on top …
         self._hist = _Histogram(threshold)
+        self._hist.range_changed.connect(self._on_hist_range_changed)
+        self._hist.selection_cleared.connect(self._on_hist_cleared)
         layout.addWidget(self._hist)
 
-        self._bw_row = QLabel("")
-        self._bw_row.setOpenExternalLinks(False)
-        self._bw_row.setStyleSheet("color: #333;")
-        self._bw_row.mousePressEvent = self._on_bw_click  # type: ignore[assignment]
-        layout.addWidget(self._bw_row)
+        # … key metrics (left) + current range (right) on one line
+        mid_row = QHBoxLayout()
+        self._counts_label = QLabel("No results yet")
+        self._counts_label.setStyleSheet("padding: 2px;")
+        mid_row.addWidget(self._counts_label)
+        mid_row.addStretch(1)
+        self._range_label = QLabel("Range: 0.00 – 1.00")
+        self._range_label.setStyleSheet("padding: 2px;")
+        mid_row.addWidget(self._range_label)
+        layout.addLayout(mid_row)
 
-        self._best_path = ""
-        self._worst_path = ""
+        # NOTE: the enable/disable toggle button lives in the main window's
+        # filter row (next to the threshold slider) – it drives the panel
+        # through set_selection_enabled() / is_selection_enabled().
 
     # ------------------------------------------------------------------
     # public API
@@ -138,6 +334,52 @@ class StatsPanel(QWidget):
     def set_threshold(self, threshold: float) -> None:
         """Update the histogram threshold tick (live config change)."""
         self._hist.set_threshold(threshold)
+
+    def set_selection_count(self, n: int) -> None:
+        self._sel_count = n
+        self._hist.set_selection_count(n)
+        self._update_range_label()
+
+    def reset_range(self) -> None:
+        self._sel_count = None
+        self._hist.reset_range()
+
+    # ------------------------------------------------------------------
+    # internal
+    # ------------------------------------------------------------------
+
+    def _on_hist_range_changed(self, lo: float, hi: float) -> None:
+        self.range_changed.emit(lo, hi)
+        self._update_range_label()
+
+    def _on_hist_cleared(self) -> None:
+        self._sel_count = None
+        self.selection_cleared.emit()
+        self._update_range_label()
+
+    def _update_range_label(self) -> None:
+        lo, hi = self._hist.current_range()
+        if self._sel_count is not None:
+            self._range_label.setText(
+                f"Range: {lo:.2f} – {hi:.2f}  ·  {self._sel_count} img"
+            )
+        else:
+            self._range_label.setText(f"Range: {lo:.2f} – {hi:.2f}")
+
+    def set_selection_enabled(self, on: bool) -> None:
+        """Enable / disable the range-selection handles (external toggle)."""
+        self._hist.set_enabled(on)
+        if not on:
+            self._hist.reset_range()
+
+    def is_selection_enabled(self) -> bool:
+        return self._hist._enabled
+
+    def has_selection(self) -> bool:
+        return self._hist.has_selection()
+
+    def current_range(self) -> tuple[float, float]:
+        return self._hist.current_range()
 
     def set_results(self, results: list[ImageQualityMetrics]) -> None:
         ok = [r for r in results if not r.is_error]
@@ -181,28 +423,3 @@ class StatsPanel(QWidget):
         self._counts_label.setText("   ".join(chips))
 
         self._hist.set_scores([r.composite_score for r in ok])
-
-        if ok:
-            best = max(ok, key=lambda r: r.composite_score)
-            worst = min(ok, key=lambda r: r.composite_score)
-            self._best_path, self._worst_path = best.path, worst.path
-            self._bw_row.setText(
-                f"best: {os.path.basename(best.path)} ({best.composite_score:.2f})"
-                f"      worst: {os.path.basename(worst.path)} ({worst.composite_score:.2f})"
-                f"   [click to select]"
-            )
-        else:
-            self._best_path = self._worst_path = ""
-            self._bw_row.setText("")
-
-    # ------------------------------------------------------------------
-    # internals
-    # ------------------------------------------------------------------
-
-    def _on_bw_click(self, _ev) -> None:  # type: ignore[no-untyped-def]
-        if self._best_path or self._worst_path:
-            # left half → best, right half → worst
-            x = _ev.position().x() if hasattr(_ev, "position") else _ev.x()  # type: ignore[union-attr]
-            pick = self._best_path if x < self._bw_row.width() / 2 else self._worst_path
-            if pick:
-                self.select_requested.emit(pick)

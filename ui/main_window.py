@@ -321,7 +321,17 @@ class MainWindow(QMainWindow):
 
         self._table = QTableWidget()
         self._table_model = QualityTableModel(self._table)
+        # multi-select (Ctrl/Shift + mouse) – needed for the histogram
+        # range selection and for moving several images at once
+        self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         quality_layout.addWidget(self._table)
+
+        # batch stats (Quality tab only): score histogram with
+        # drag-to-select range + status counts, between the table and
+        # the quality-threshold slider
+        self._stats = StatsPanel(DEFAULT_CONFIG.blur_threshold)
+        quality_layout.addWidget(self._stats)
 
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("Quality Threshold:"))
@@ -331,6 +341,18 @@ class MainWindow(QMainWindow):
         self._quality_label = QLabel("0.50")
         filter_row.addWidget(self._quality_slider)
         filter_row.addWidget(self._quality_label)
+
+        # range-selection toggle – compact, first in the filter row, right
+        # after the threshold slider (checked = the histogram range box is
+        # active; unchecked = handles disabled + range reset)
+        self._btn_sel_range = QPushButton("Range")
+        self._btn_sel_range.setCheckable(True)
+        self._btn_sel_range.setChecked(True)
+        self._btn_sel_range.setToolTip(
+            "Enable / disable the histogram range-selection box"
+        )
+        self._btn_sel_range.toggled.connect(self._on_toggle_sel_range)
+        filter_row.addWidget(self._btn_sel_range)
 
         self._btn_show_all = QPushButton("Show All")
         self._btn_show_blurry = QPushButton("Show Blurry Only")
@@ -369,9 +391,6 @@ class MainWindow(QMainWindow):
         # right: preview column + settings panel (horizontal splitter)
         preview_col = QWidget()
         right_layout = QVBoxLayout(preview_col)
-
-        self._stats = StatsPanel(DEFAULT_CONFIG.blur_threshold)
-        right_layout.addWidget(self._stats)
 
         self._viewer = ImageViewer()
         self._viewer.setMinimumSize(300, 160)
@@ -511,6 +530,9 @@ class MainWindow(QMainWindow):
         from styles import apply_stylesheet
 
         apply_stylesheet(QApplication.instance(), theme=theme)
+        # the preview canvas background is not styled via QSS – keep it in
+        # sync manually (dark gray instead of the old glaring light gray)
+        self._viewer.set_theme(theme)
         self._act_theme_dark.setChecked(theme == "dark")
         self._act_theme_light.setChecked(theme == "light")
 
@@ -573,7 +595,8 @@ class MainWindow(QMainWindow):
         self._btn_explorer.clicked.connect(self._open_in_explorer)
         self._btn_export.clicked.connect(self._export_results)
 
-        self._stats.select_requested.connect(self._select_path)
+        self._stats.range_changed.connect(self._on_histogram_range_changed)
+        self._stats.selection_cleared.connect(self._on_histogram_selection_cleared)
 
         # settings panel: live-apply side effects (e.g. histogram tick)
         self._settings.changed.connect(self._on_settings_changed)
@@ -855,6 +878,12 @@ class MainWindow(QMainWindow):
             self._clear_info()
             return
 
+        # Multi-selection (histogram range, Ctrl-clicked rows) has no
+        # single image to preview – skip the full-resolution load, which
+        # takes seconds per image and would freeze the UI.
+        if len({i.row() for i in indexes}) > 1:
+            return
+
         row = indexes[0].row()
         r = self._result_at_row(row)
         if r is not None:
@@ -1103,10 +1132,15 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _selected_rows(self) -> list[int]:
-        rows: set[int] = set()
-        for item in self._table.selectedItems():
-            rows.add(item.row())
-        return sorted(rows)
+        # Read from the selection model, NOT from selectedItems(): in this
+        # PyQt5/Qt build selectedItems() silently drops rows that are hidden
+        # by the quality filter – but a histogram range selection may
+        # legitimately include such rows ("select everything in 0.30–0.50"
+        # must also catch the filtered-out images).
+        sm = self._table.selectionModel()
+        if sm is None:
+            return []
+        return sorted({idx.row() for idx in sm.selectedRows(0)})
 
     def _result_at_row(self, row: int) -> ImageQualityMetrics | None:
         """
@@ -1121,15 +1155,52 @@ class MainWindow(QMainWindow):
             return None
         return self._by_path.get(path)
 
-    def _select_path(self, path: str) -> None:
-        """Select the table row for *path* (from the stats best/worst)."""
-        for row in range(self._table.rowCount()):
-            if self._table_model.path_at_row(row) == path:
-                self._table.selectRow(row)
-                item = self._table.item(row, 1)
-                if item is not None:
-                    self._table.scrollToItem(item)
-                break
+    def _on_histogram_range_changed(self, lo: float, hi: float) -> None:
+        """Select every table row whose composite score lies in [lo, hi]."""
+        from PyQt5.QtCore import QItemSelectionModel
+
+        rows = [
+            row for row in range(self._table.rowCount())
+            if (r := self._result_at_row(row)) is not None
+            and lo <= r.composite_score <= hi
+        ]
+        # NOTE: QTableWidget.selectRow() *replaces* the selection in this
+        # PyQt5/Qt build – use the selection model for additive selection.
+        sm = self._table.selectionModel()
+        if sm is not None:
+            # Each sm.select() fires selectionChanged → _on_selection_changed,
+            # which loads a FULL-RESOLUTION preview (seconds per image) –
+            # with N selected images that would freeze the UI for minutes.
+            # A bulk range selection has no single image to preview anyway.
+            sm.blockSignals(True)
+            try:
+                first = True
+                for row in rows:
+                    flags = (QItemSelectionModel.ClearAndSelect if first
+                             else QItemSelectionModel.Select)
+                    sm.select(self._table.model().index(row, 0),
+                              flags | QItemSelectionModel.Rows)
+                    first = False
+            finally:
+                sm.blockSignals(False)
+            # The table view relies on selectionChanged (which we blocked)
+            # to schedule its repaint – without this the selection stays
+            # visually stale until an unrelated event (e.g. scrolling)
+            # repaints the table.
+            self._table.viewport().update()
+        self._stats.set_selection_count(len(rows))
+
+    def _on_histogram_selection_cleared(self) -> None:
+        self._table.clearSelection()
+        self._table.viewport().update()
+
+    def _on_toggle_sel_range(self, on: bool) -> None:
+        """Toggle the histogram range-selection box on / off.
+
+        Turning it off also resets the range to 0.00–1.00 and clears the
+        table selection (via the stats panel's selection_cleared signal).
+        """
+        self._stats.set_selection_enabled(on)
 
     def _move_selected(self, folder_type: str) -> None:
         rows = self._selected_rows()
@@ -1175,6 +1246,12 @@ class MainWindow(QMainWindow):
         self._results = existing
         self._by_path = {r.path: r for r in existing}
         self._table_model.set_results(existing)
+        # keep the stats (histogram + counts) in sync; the data changed,
+        # so reset the selection range (full 0.00–1.00) and clear the
+        # table selection
+        self._stats.set_results(existing)
+        self._stats.reset_range()
+        self._apply_active_filter()
 
     def _open_in_explorer(self) -> None:
         rows = self._selected_rows()

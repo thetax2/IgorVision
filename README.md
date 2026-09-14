@@ -31,8 +31,16 @@ python main.py
 - **EXIF**: camera, aperture, shutter, ISO, focal length, GPS, date –
   in info panel + CSV; EXIF orientation applied once
 - Quality filters (threshold slider, "Blurry Only")
-- **Batch statistics panel**: status counts, 24-bin score histogram with
-  threshold marker, best/worst image (click → select in table)
+- **Batch statistics panel** (Quality tab, between table and threshold
+  slider): 60-bin score histogram with 0.00–1.00 axis and threshold marker,
+  plus a built-in **selection range** – two thick handles (left / right)
+  with a shaded area: drag a handle to expand / shrink the range, drag the
+  middle to slide it, double-click to reset (0.00–1.00); the matching table
+  rows are selected live and the current range (e.g. `0.30 – 0.50 · 2 img`)
+  is shown right next to the status counts; a compact **Range** toggle
+  (in the filter row, before "Show All") activates / deactivates the range
+  handles; then e.g. "Move to Reject"; status counts (sharp / blurry /
+  exp / clip / …) on the same line
 - **Full-resolution preview panel** with zoom controls:
   - `+` / `−` zoom buttons, mouse-wheel zoom (anchored under cursor)
   - **Centre** (re-centre image) and **Fit** (overview)
@@ -84,7 +92,7 @@ In addition to the quality analysis, IgorVision bundles five file tools
 | `utils.py` | Thumbnails, file collection |
 | `ui/main_window.py` | Main window, worker QThread, actions, `build_export_rows`, CSV export, stats wiring |
 | `ui/table_model.py` | Results table (colour coding, status via `status_text`) |
-| `ui/stats_panel.py` | **Batch statistics** (Phase 2): counts + 24-bin histogram + best/worst |
+| `ui/stats_panel.py` | **Batch statistics**: 60-bin score histogram (0.00–1.00 axis, handle-based selection range + range label) + status counts; the Range on/off toggle lives in the main window's filter row |
 | `ui/settings_panel.py` | **Tab-aware settings panel**: live tuning of all `config.py` parameters (Quality sliders + Overlap SIFT fields), QSettings persistence, reset to defaults |
 | `ui/preferences_dialog.py` | **Program-wide preferences** (Settings → Preferences): CPU cores (`prefs/cores`) + ExifTool path (`prefs/exiftool`) with Browse / Auto-detect / live version check |
 | `ui/image_viewer.py` | Preview viewer (full resolution, `zoom_in` / `zoom_out` / `zoom_to` / `center_image` / `reset_view`, `zoom_changed` signal) |

@@ -56,6 +56,11 @@ class QualityTableModel:
 
     def set_results(self, results: list[ImageQualityMetrics]) -> None:
         self._results = list(results)
+        # New data → any previous selection is stale (it refers to the old
+        # rows).  Clear it *before* rebuilding, otherwise the selection
+        # survives as raw row indexes and silently "attaches" to whatever
+        # item ends up in those rows after the rebuild + sort.
+        self._table.clearSelection()
         self._refresh()
 
     def add_result(self, result: ImageQualityMetrics) -> None:

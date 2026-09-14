@@ -24,7 +24,7 @@ import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QImage, QPainter, QPixmap, QWheelEvent
-from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView
+from PyQt5.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,34 @@ class ImageViewer(QGraphicsView):
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
-        self.setBackgroundBrush(QBrush(QColor(240, 240, 240)))
+        # The canvas background follows the active app theme – the old
+        # hard-coded light gray (240,240,240) was glaring in the dark
+        # theme.  MainWindow._set_theme keeps this in sync on switch.
+        self.set_theme(self._detect_app_theme())
         self.setMouseTracking(True)
+
+    # ------------------------------------------------------------------
+    # theming
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_app_theme() -> str:
+        """Read the active theme from the installed stylesheet (dark default)."""
+        try:
+            from styles import current_theme
+            app = QApplication.instance()
+            if app is not None:
+                return current_theme(app)
+        except Exception:
+            pass
+        return "dark"
+
+    def set_theme(self, theme: str) -> None:
+        """Set the canvas background from the design-system palette."""
+        from styles import DARK, LIGHT
+
+        palette = DARK if str(theme).lower() == "dark" else LIGHT
+        self.setBackgroundBrush(QBrush(QColor(palette["bg"])))
 
     # ------------------------------------------------------------------
     # public API – loading

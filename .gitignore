@@ -26,3 +26,6 @@ Backup/
 
 # Local reference docs (never uploaded)
 tools/realityscan_cli_commands.html
+
+# Agent handoff documents (local only – never uploaded)
+handoffs/
