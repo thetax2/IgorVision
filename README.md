@@ -130,8 +130,7 @@ _TODO: add 1–2 app screenshots (e.g. `docs/screenshot.png`) and reference them
      in the sharpest blocks.
    Sharp, strongly textured images (straw, bark, reeds) can sit at one
    extreme (straw → high `delta_conc`; reeds → low `lag_aniso`) but
-   never at both – calibrated on 4,241 sharp reference images
-   (Galli Colmap/Interior/Exterior + EichenHain):
+   never at both – calibrated on 4,241 sharp reference images:
    only both together → penalty (up to `motion_blur_penalty_max`
    = 95 %).
 8. Score < `blur_threshold` (default 0.5) → **⚠️ Blurry**.
