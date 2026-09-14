@@ -39,14 +39,38 @@ python main.py
 - Preview panel (zoom / Shift-scroll), double-click = full-screen dialog
 - "Move to Keep / Reject Folder", "Open in Explorer", CSV export
   (55 columns including all photogrammetry, exposure/WB, and EXIF fields)
+- **Theme**: darktable-inspired **dark theme** (default) and a light
+  variant – switch under *Settings → Dark/Light Theme* (persisted)
+- **Settings panel** (right of the preview): tab-aware live tuning of
+  every `config.py` parameter – *Quality* page: all 28 numeric
+  parameters as slider + value field (grouped by section) plus 10
+  boolean toggles; *Overlap* page: SIFT features / ratio / RANSAC as
+  value fields. Changes apply immediately (next analysis/scan picks
+  them up), persist across restarts, and *Reset to Defaults* restores
+  the `config.py` values
 
+## File Tools (IGOR integration)
 
+In addition to the quality analysis, IgorVision bundles four file tools
+(integrated from the IGOR project) as top-level tabs:
+
+| Tab | What it does |
+|---|---|
+| **Compare** | Reconciles the *Shooting days* tree against the *Ingest_Backup*: finds media (RAW/JPG/video) present in the backup but missing from the shooting days. Optional SHA-256 matching, EXIF metadata via ExifTool (chunked + SQLite-cached for incremental rescans), subfolder planning (date / focal / model / lens / media), rename with prefix/suffix/EXIF name parts, *Refresh* (replan without rescan), then manual **Copy** or **Move** transfer with CSV + JSON reports. |
+| **Rename** | Renames RAW files to match their JPG counterparts by camera base ID (`image0001.cr3` + `image0001_35mm_UpperPart.jpg` → `image0001_35mm_UpperPart.cr3`). Analyze (preview) + Execute (copy to target), dry-run and overwrite options. |
+| **Sort** | Sorts images of a Reality-Capture project into per-component folders based on `.imagelist` files (copy or move). |
+| **Metashape** | Phase 1: reads `Image/Quality` from an Agisoft Metashape `.psx` project and removes JPGs below a threshold slider (trash / `_removed/` / delete). Phase 2: finds orphaned RAWs (no matching JPG) and moves them to the trash. |
+
+## Screenshots
+
+_TODO: add 1–2 app screenshots (e.g. `docs/screenshot.png`) and reference them here._
 
 ## Architecture
 
 | File | Role |
 |---|---|
 | `main.py` | Entry point, `QApplication` + `MainWindow` (UI is lazily imported – worker processes don't load PyQt) |
+| `styles.py` | **Design system**: darktable-inspired dark/light QSS themes |
 | `config.py` | **All** tuning parameters (`AnalysisConfig`) |
 | `models.py` | Data classes (`BlockMetrics`, `ImageQualityMetrics`), shared `status_text` |
 | `imageio.py` | **Ingestion** (Phase 1): loader dispatch (cv2 / pillow-heif / rawpy), EXIF parsing, 16-bit/RAW normalisation, MD5, reduced decode |
@@ -57,8 +81,22 @@ python main.py
 | `ui/main_window.py` | Main window, worker QThread, actions, `build_export_rows`, CSV export, stats wiring |
 | `ui/table_model.py` | Results table (colour coding, status via `status_text`) |
 | `ui/stats_panel.py` | **Batch statistics** (Phase 2): counts + 24-bin histogram + best/worst |
+| `ui/settings_panel.py` | **Tab-aware settings panel**: live tuning of all `config.py` parameters (Quality sliders + Overlap SIFT fields), QSettings persistence, reset to defaults |
 | `ui/image_viewer.py` | Preview viewer (full resolution, `zoom_in` / `zoom_out` / `zoom_to` / `center_image` / `reset_view`, `zoom_changed` signal) |
 | `ui/preview_dialog.py` | Full-screen preview |
+| `tools/comparison.py` | **Compare engine** (Qt-free): scan, index, EXIF metadata, destination planning, transfer |
+| `tools/db.py` | SQLite incremental scan index + EXIF cache (WAL, one connection per thread) |
+| `tools/rename_engine.py` | Rename data model (`RenameConfig`, `RenameMapping`) |
+| `tools/metashape_engine.py` | Metashape `.psx` quality reader + orphaned-RAW detection |
+| `tools/compare_worker.py` | QThread workers: Compare / Replan / Transfer / ExifTool-check |
+| `tools/rename_worker.py` | QThread worker: analyze + execute rename |
+| `tools/metashape_worker.py` | QThread worker: load / filter / cleanup |
+| `ui/compare_tab.py` | Compare tab (paths, rename, subfolders, results table, log) |
+| `ui/rename_tab.py` | Rename tab |
+| `ui/sort_tab.py` | Sort tab (incl. its `SortWorker`) |
+| `ui/metashape_tab.py` | Metashape tab (Phase 1 + Phase 2) |
+| `ui/log_panel.py` | Shared scrollable log console |
+| `ui/path_row.py` | Shared path picker row (label + input + browse) |
 
 ## How the Scoring Works
 
@@ -87,7 +125,8 @@ python main.py
      in the sharpest blocks.
    Sharp, strongly textured images (straw, bark, reeds) can sit at one
    extreme (straw → high `delta_conc`; reeds → low `lag_aniso`) but
-   never at both – calibrated on 4,241 sharp reference images:
+   never at both – calibrated on 4,241 sharp reference images
+   (Galli Colmap/Interior/Exterior + EichenHain):
    only both together → penalty (up to `motion_blur_penalty_max`
    = 95 %).
 8. Score < `blur_threshold` (default 0.5) → **⚠️ Blurry**.
@@ -213,7 +252,10 @@ where features were detected and how the overlap is computed.
 
 ### Configuration
 
-All parameters are in [`config.py`](config.py):
+All parameters are in [`config.py`](config.py) – and can be tuned
+**live in the UI**: open the **Overlap** tab and the settings panel
+right of the preview shows the three matching parameters as value
+fields (changes apply to the next overlap scan):
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -223,7 +265,14 @@ All parameters are in [`config.py`](config.py):
 
 ## Calibration
 
-All values are in [`config.py`](config.py) (`DEFAULT_CONFIG`).
+All values are in [`config.py`](config.py) (`DEFAULT_CONFIG`) – and can
+be adjusted **live in the UI**: with the **Quality** tab active, the
+settings panel right of the preview lists every numeric parameter as a
+slider + value field (grouped by section) plus the boolean toggles.
+Changes apply immediately and persist across restarts; *Reset to
+Defaults* restores the `config.py` values. `overlap_check` stays as the
+"Overlap-Check" checkbox in the toolbar.
+
 Recommended workflow:
 
 1. Run a folder of 20–30 of your own photos that you've rated as

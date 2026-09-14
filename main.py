@@ -42,6 +42,11 @@ def main() -> None:
     app.setOrganizationName("IgorVision")
     app.setStyle("Fusion")
 
+    # Design system: darktable-inspired dark theme by default.
+    # MainWindow restores a persisted theme choice on top of this.
+    from styles import apply_stylesheet
+    apply_stylesheet(app, theme="dark")
+
     window = MainWindow()
     window.show()
 

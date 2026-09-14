@@ -12,6 +12,11 @@ import threading
 
 from PyQt5.QtCore import QObject, Qt, QSettings, QThread, pyqtSignal
 from PyQt5.QtGui import QColor
+
+try:  # PyQt5 < 5.12 style
+    from PyQt5.QtGui import QAction
+except ImportError:  # PyQt6-style build
+    from PyQt5.QtWidgets import QAction
 from PyQt5.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -24,12 +29,9 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QDoubleSpinBox,
     QProgressBar,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
-    QSpinBox,
     QSlider,
     QTabWidget,
     QSplitter,
@@ -47,7 +49,12 @@ from workers import run_analysis
 from .image_viewer import ImageViewer
 from .table_model import QualityTableModel
 from .preview_dialog import ImagePreviewDialog
+from .settings_panel import SettingsPanel
 from .stats_panel import StatsPanel
+from .compare_tab import CompareTab
+from .rename_tab import RenameTab
+from .sort_tab import SortTab
+from .metashape_tab import MetashapeTab
 
 logger = logging.getLogger(__name__)
 
@@ -237,9 +244,20 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _setup_ui(self) -> None:
+        self._setup_menu()
+
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # --- top-level tabs: Quality (IgorVision) + IGOR file tools ---
+        self._main_tabs = QTabWidget()
+        self._main_tabs.setDocumentMode(True)
+
+        quality_page = QWidget()
+        page_layout = QVBoxLayout(quality_page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
 
         # --- toolbar ---
         toolbar = QHBoxLayout()
@@ -279,15 +297,15 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._btn_overlap_scan)
         toolbar.addWidget(self._btn_stop)
         toolbar.addStretch()
-        layout.addLayout(toolbar)
+        page_layout.addLayout(toolbar)
 
         # --- main splitter ---
         splitter = self._splitter = QSplitter(Qt.Horizontal)
 
-        # left: tabbed results (Qualität + Overlap)
+        # left: tabbed results (Quality + Overlap)
         self._left_tabs = QTabWidget()
 
-        # --- Tab 1: Qualität (existing table + filters) ---
+        # --- Tab 1: Quality (existing table + filters) ---
         quality_tab = QWidget()
         quality_layout = QVBoxLayout(quality_tab)
         quality_layout.setContentsMargins(0, 0, 0, 0)
@@ -311,7 +329,7 @@ class MainWindow(QMainWindow):
         filter_row.addWidget(self._btn_show_blurry)
         quality_layout.addLayout(filter_row)
 
-        self._left_tabs.addTab(quality_tab, "Qualität")
+        self._left_tabs.addTab(quality_tab, "Quality")
 
         # --- Tab 2: Overlap (capture order) ---
         overlap_tab = QWidget()
@@ -340,9 +358,9 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(self._left_tabs)
 
-        # right: preview + info + actions
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
+        # right: preview column + settings panel (horizontal splitter)
+        preview_col = QWidget()
+        right_layout = QVBoxLayout(preview_col)
 
         self._stats = StatsPanel(DEFAULT_CONFIG.blur_threshold)
         right_layout.addWidget(self._stats)
@@ -351,45 +369,6 @@ class MainWindow(QMainWindow):
         self._viewer.setMinimumSize(300, 160)
         self._viewer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # --- SIFT matching parameters bar (between stats and zoom) ---
-        param_bar = QWidget()
-        prow = QHBoxLayout(param_bar)
-        prow.setContentsMargins(0, 0, 0, 0)
-        prow.setSpacing(6)
-        prow.addWidget(QLabel("SIFT:"))
-
-        self._sift_features = QSpinBox()
-        self._sift_features.setRange(500, 10000)
-        self._sift_features.setSingleStep(500)
-        self._sift_features.setValue(DEFAULT_CONFIG.sift_n_features)
-        self._sift_features.setToolTip("Max. SIFT Keypoints pro Bild")
-        self._sift_features.setFixedWidth(72)
-        prow.addWidget(QLabel("Feat:"))
-        prow.addWidget(self._sift_features)
-
-        self._sift_ratio = QDoubleSpinBox()
-        self._sift_ratio.setRange(0.50, 0.95)
-        self._sift_ratio.setSingleStep(0.05)
-        self._sift_ratio.setDecimals(2)
-        self._sift_ratio.setValue(DEFAULT_CONFIG.sift_ratio)
-        self._sift_ratio.setToolTip("Lowe-Ratio (niedriger = strenger Match-Filter)")
-        self._sift_ratio.setFixedWidth(64)
-        prow.addWidget(QLabel("Ratio:"))
-        prow.addWidget(self._sift_ratio)
-
-        self._sift_ransac = QDoubleSpinBox()
-        self._sift_ransac.setRange(1.0, 10.0)
-        self._sift_ransac.setSingleStep(0.5)
-        self._sift_ransac.setDecimals(1)
-        self._sift_ransac.setValue(DEFAULT_CONFIG.sift_ransac_px)
-        self._sift_ransac.setToolTip("RANSAC Reprojektionstoleranz (px)")
-        self._sift_ransac.setFixedWidth(64)
-        prow.addWidget(QLabel("RANSAC:"))
-        prow.addWidget(self._sift_ransac)
-
-        prow.addStretch(1)
-        right_layout.addWidget(param_bar)
-
         # --- zoom toolbar above the preview ---
         zoom_bar = QWidget()
         zrow = QHBoxLayout(zoom_bar)
@@ -397,8 +376,8 @@ class MainWindow(QMainWindow):
         zrow.setSpacing(4)
         self._btn_zoom_out = QPushButton("−")
         self._btn_zoom_in = QPushButton("+")
-        self._btn_zoom_center = QPushButton("⌖ Zentrieren")
-        self._btn_zoom_fit = QPushButton("⤢ Passend")
+        self._btn_zoom_center = QPushButton("⌖ Center")
+        self._btn_zoom_fit = QPushButton("⤢ Fit")
         self._btn_zoom_in.setFixedWidth(30)
         self._btn_zoom_out.setFixedWidth(30)
         self._zoom_combo = QComboBox()
@@ -437,11 +416,21 @@ class MainWindow(QMainWindow):
         actions.addWidget(self._btn_export, 1, 1)
         right_layout.addLayout(actions)
 
-        splitter.addWidget(right)
-        splitter.setSizes([1000, 600])
+        # --- settings panel (right of the preview, tab-aware) ---
+        self._settings = SettingsPanel()
+        self._settings.setMinimumWidth(280)
+
+        self._right_split = QSplitter(Qt.Horizontal)
+        self._right_split.addWidget(preview_col)
+        self._right_split.addWidget(self._settings)
+        self._right_split.setSizes([600, 320])
+        self._right_split.setChildrenCollapsible(False)
+
+        splitter.addWidget(self._right_split)
+        splitter.setSizes([1000, 900])
         # stretch so the table area always fills the window and the
         # progress bar stays pinned to the bottom
-        layout.addWidget(splitter, 1)
+        page_layout.addWidget(splitter, 1)
 
         # --- progress bar (bottom of the window) ---
         self._progress = QProgressBar()
@@ -452,10 +441,56 @@ class MainWindow(QMainWindow):
         prog_row = QHBoxLayout()
         prog_row.addWidget(self._progress)
         prog_row.addWidget(self._progress_label)
-        layout.addLayout(prog_row)
+        page_layout.addLayout(prog_row)
 
         # status bar
         self.statusBar().showMessage("Ready")
+
+        # --- register top-level tabs ---
+        self._main_tabs.addTab(quality_page, "Quality")
+        self._main_tabs.addTab(CompareTab(), "Compare")
+        self._main_tabs.addTab(RenameTab(), "Rename")
+        self._main_tabs.addTab(SortTab(), "Sort")
+        self._main_tabs.addTab(MetashapeTab(), "Metashape")
+        layout.addWidget(self._main_tabs, 1)
+
+    # ==================================================================
+    # menu / theme
+    # ==================================================================
+
+    def _setup_menu(self) -> None:
+        mb = self.menuBar()
+
+        m_settings = mb.addMenu("&Settings")
+        self._act_theme_dark = QAction("Dark Theme", self, checkable=True, checked=True)
+        self._act_theme_light = QAction("Light Theme", self, checkable=True)
+        self._act_theme_dark.triggered.connect(lambda: self._set_theme("dark"))
+        self._act_theme_light.triggered.connect(lambda: self._set_theme("light"))
+        m_settings.addAction(self._act_theme_dark)
+        m_settings.addAction(self._act_theme_light)
+
+        m_help = mb.addMenu("&Help")
+        act_about = QAction("About IgorVision", self)
+        act_about.triggered.connect(self._show_about)
+        m_help.addAction(act_about)
+
+    def _set_theme(self, theme: str) -> None:
+        """Switch between the dark and light design (persisted via QSettings)."""
+        from PyQt5.QtWidgets import QApplication
+        from styles import apply_stylesheet
+
+        apply_stylesheet(QApplication.instance(), theme=theme)
+        self._act_theme_dark.setChecked(theme == "dark")
+        self._act_theme_light.setChecked(theme == "light")
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "About IgorVision",
+            "<b>IgorVision</b> – Professional Image Quality Inspector<br>"
+            "Bokeh-aware, absolute quality scoring for photogrammetry workflows,<br>"
+            "plus integrated file tools: Compare, Rename, Sort, Metashape cleanup.",
+        )
 
     # ==================================================================
     # signal connections
@@ -499,6 +534,9 @@ class MainWindow(QMainWindow):
         self._btn_export.clicked.connect(self._export_results)
 
         self._stats.select_requested.connect(self._select_path)
+
+        # settings panel: live-apply side effects (e.g. histogram tick)
+        self._settings.changed.connect(self._on_settings_changed)
 
     # ==================================================================
     # file selection
@@ -551,10 +589,9 @@ class MainWindow(QMainWindow):
         num_workers = self._cores_slider.value()
         do_overlap = self._chk_overlap.isChecked()
 
-        # Push UI SIFT parameters into config (worker reads from DEFAULT_CONFIG)
-        DEFAULT_CONFIG.sift_n_features = self._sift_features.value()
-        DEFAULT_CONFIG.sift_ratio = self._sift_ratio.value()
-        DEFAULT_CONFIG.sift_ransac_px = self._sift_ransac.value()
+        # Note: SIFT / quality parameters are applied live by the
+        # settings panel (ui/settings_panel.py) – the worker reads them
+        # from DEFAULT_CONFIG at run time.
 
         self._worker = _AnalysisWorker(
             image_paths, num_workers, self._stop_event, do_overlap=do_overlap
@@ -598,7 +635,7 @@ class MainWindow(QMainWindow):
         if total > 0:
             self._progress.setValue(int(completed / total * 1000))
         self._progress_label.setText(
-            f"Qualität: {completed}/{total}  {os.path.basename(current)}"
+            f"Quality: {completed}/{total}  {os.path.basename(current)}"
         )
 
     def _on_overlap_progress(self, completed: int, total: int, current: str) -> None:
@@ -657,7 +694,7 @@ class MainWindow(QMainWindow):
         keypoint visualisation in the preview."""
         if not self._results:
             QMessageBox.information(self, "Overlap Scan",
-                                    "Keine Bilder geladen.\nStarte zuerst die Analysis.")
+                                    "No images loaded.\nStart the analysis first.")
             return
 
         from workers import OverlapScanWorker
@@ -781,9 +818,9 @@ class MainWindow(QMainWindow):
         ``self._info_labels`` keyed by a short id used by ``_update_info``.
         """
         tabs = [
-            ("Qualität", "score"),
-            ("SfM-Checks", "sfm"),
-            ("Belichtung & WB", "ewb"),
+            ("Quality", "score"),
+            ("SfM checks", "sfm"),
+            ("Exposure & WB", "ewb"),
             ("EXIF", "exif"),
             ("Global", "global"),
         ]
@@ -835,7 +872,7 @@ class MainWindow(QMainWindow):
         if r.is_error:
             err_html = f"<hr><b style=\"color:#c00\">⚫ Load error:</b> {r.load_note or 'unknown'}<br>"
 
-        # Belichtung & Weißabgleich (raw values always shown for calibration)
+        # Exposure & white balance (raw values always shown for calibration)
         ev_txt = "n/a" if not r.ev else f"{r.ev:.1f}"
         expo_txt = "n/a" if r.expo_dev == 0.0 else f"{r.expo_dev:+.2f}"
         iso_txt = "n/a"
@@ -845,13 +882,13 @@ class MainWindow(QMainWindow):
         if r.exif and r.exif.get("aperture"):
             ap_txt = f"f/{r.exif['aperture']:.1f} ({r.aperture_dev_stops:+.2f} st)"
         ewb_html = (
-            "<hr><b>Belichtung & Weißabgleich:</b><br>"
-            f"• Luminanz-Median: {r.luma_median:.0f} · Dynamic-Range (p95-p5): {r.dynamic_range:.0f}"
+            "<hr><b>Exposure & white balance:</b><br>"
+            f"• Luma median: {r.luma_median:.0f} · Dynamic range (p95-p5): {r.dynamic_range:.0f}"
             f"{' ⚠️ flat' if r.low_dynamic_range else ''}<br>"
-            f"• EV (ISO-100): {ev_txt} · Δ zu Set: {expo_txt}"
+            f"• EV (ISO-100): {ev_txt} · Δ vs set: {expo_txt}"
             f"{' ⚠️ drift' if r.exposure_outlier else ''}<br>"
-            f"• Weißabgleich: ≈ {r.wb_kelvin:.0f} K (R/G {r.wb_gain_rg:.2f}, B/G {r.wb_gain_bg:.2f})"
-            f" · Δ zum Set: {r.wb_dev:.3f}{' ⚠️ drift' if r.wb_outlier else ''}<br>"
+            f"• White balance: ≈ {r.wb_kelvin:.0f} K (R/G {r.wb_gain_rg:.2f}, B/G {r.wb_gain_bg:.2f})"
+            f" · Δ vs set: {r.wb_dev:.3f}{' ⚠️ drift' if r.wb_outlier else ''}<br>"
             f"• {iso_txt} · {ap_txt}<br>"
         )
 
@@ -900,7 +937,7 @@ class MainWindow(QMainWindow):
         self._info_labels["score"].setText(score_html)
         self._info_labels["sfm"].setText(sfm_html)
         self._info_labels["ewb"].setText(ewb_html)
-        self._info_labels["exif"].setText((exif_html + dup_html) or "<i>keine EXIF-Daten</i>")
+        self._info_labels["exif"].setText((exif_html + dup_html) or "<i>no EXIF data</i>")
         self._info_labels["global"].setText(global_html)
 
     def _open_preview_dialog(self, row: int, _col: int) -> None:
@@ -942,6 +979,8 @@ class MainWindow(QMainWindow):
                         ov_item.setBackground(QColor(200, 220, 255))
                     else:
                         ov_item.setBackground(QColor(210, 255, 210))
+                    # Dark text on the light fills (readable in both themes)
+                    ov_item.setForeground(QColor(28, 31, 36))
                 t.setItem(i, 2, ov_item)
             else:
                 t.setItem(i, 2, QTableWidgetItem("n/a"))
@@ -972,11 +1011,21 @@ class MainWindow(QMainWindow):
             self._viewer.zoom_to(25)
             self._update_info(r)
 
-    def _on_left_tab_changed(self, _index: int) -> None:
-        """Connect/disconnect overlap table selection when switching tabs."""
-        # The overlap table selection is connected once in _connect_signals;
-        # this slot is a placeholder for future tab-specific behaviour.
-        pass
+    def _on_left_tab_changed(self, index: int) -> None:
+        """Switch the settings panel page to match the active tab.
+
+        Tab 0 (Quality) → quality config sliders; tab 1 (Overlap) →
+        SIFT / matching parameters.  The overlap table selection is
+        connected once in _connect_signals.
+        """
+        self._settings.set_page(index)
+
+    def _on_settings_changed(self, name: str, value) -> None:
+        """React to live settings-panel changes (value already applied
+        to ``DEFAULT_CONFIG`` by the panel)."""
+        if name == "blur_threshold":
+            # keep the stats histogram threshold tick in sync
+            self._stats.set_threshold(float(value))
 
     # ==================================================================
     # file operations
@@ -1123,15 +1172,32 @@ class MainWindow(QMainWindow):
             self._cores_slider.setValue(int(s.value("ui/cores", self._cpu_count)))
             self._chk_recursive.setChecked(_as_bool(s.value("ui/recursive"), True))
             self._chk_overlap.setChecked(_as_bool(s.value("ui/overlap_check"), True))
-            self._sift_features.setValue(int(s.value("ui/sift_features", DEFAULT_CONFIG.sift_n_features)))
-            self._sift_ratio.setValue(float(s.value("ui/sift_ratio", DEFAULT_CONFIG.sift_ratio)))
-            self._sift_ransac.setValue(float(s.value("ui/sift_ransac", DEFAULT_CONFIG.sift_ransac_px)))
             self._quality_slider.setValue(int(s.value("ui/quality_threshold", 50)))
+
+            # settings panel (quality + overlap parameters)
+            # migrate SIFT values saved by older versions (pre-panel keys)
+            for old_key, new_name in (("ui/sift_features", "sift_n_features"),
+                                     ("ui/sift_ratio", "sift_ratio"),
+                                     ("ui/sift_ransac", "sift_ransac_px")):
+                if s.value(old_key) is not None and s.value(f"ui/config/{new_name}") is None:
+                    s.setValue(f"ui/config/{new_name}", s.value(old_key))
+            self._settings.load_settings(s)
+            self._stats.set_threshold(DEFAULT_CONFIG.blur_threshold)
+
+            state = s.value("ui/right_splitter_state")
+            if state is not None:
+                self._right_split.restoreState(bytes(state))
             self._last_folder = str(s.value("ui/last_folder", "") or "")
             self._last_files_dir = str(s.value("ui/last_files_dir", "") or "")
             self._filter_mode = str(s.value("ui/filter_mode", "all") or "all")
             if self._filter_mode not in ("all", "blurry"):
                 self._filter_mode = "all"
+
+            theme = str(s.value("ui/theme", "dark") or "dark")
+            if theme not in ("dark", "light"):
+                theme = "dark"
+            self._set_theme(theme)
+
             # keep label + (empty) table in sync with the restored threshold
             self._update_quality_filter(self._quality_slider.value())
         except Exception:
@@ -1146,13 +1212,13 @@ class MainWindow(QMainWindow):
             s.setValue("ui/cores", self._cores_slider.value())
             s.setValue("ui/recursive", self._chk_recursive.isChecked())
             s.setValue("ui/overlap_check", self._chk_overlap.isChecked())
-            s.setValue("ui/sift_features", self._sift_features.value())
-            s.setValue("ui/sift_ratio", self._sift_ratio.value())
-            s.setValue("ui/sift_ransac", self._sift_ransac.value())
             s.setValue("ui/quality_threshold", self._quality_slider.value())
+            self._settings.save_settings(s)
+            s.setValue("ui/right_splitter_state", self._right_split.saveState())
             s.setValue("ui/last_folder", self._last_folder)
             s.setValue("ui/last_files_dir", self._last_files_dir)
             s.setValue("ui/filter_mode", self._filter_mode)
+            s.setValue("ui/theme", "dark" if self._act_theme_dark.isChecked() else "light")
             s.sync()
         except Exception:
             logger.exception("Failed to save settings")

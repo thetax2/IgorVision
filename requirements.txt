@@ -19,3 +19,12 @@ PyQt5>=5.15
 # ---------------------------------------------------------------------------
 # rawpy>=0.27
 # pillow-heif>=0.11
+
+# ---------------------------------------------------------------------------
+# Optional (Metashape tab, "trash" mode).
+# Moves files to the OS trash instead of deleting. Without it the app
+# falls back to a direct delete – install for safety:
+#
+#   pip install send2trash
+# ---------------------------------------------------------------------------
+# send2trash>=1.8

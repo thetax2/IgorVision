@@ -5,6 +5,98 @@ All notable changes to IgorVision. Format loosely follows
 
 ## Unreleased
 
+### Settings panel – live tuning of all config parameters
+
+- **New tab-aware settings panel** (`ui/settings_panel.py`) to the right
+  of the image preview: the right side is now a horizontal splitter
+  (preview | settings, both resizable + persisted). The panel content
+  follows the active left tab:
+  - **Quality** – all 28 numeric `config.py` parameters as slider +
+    value-field rows, grouped (Resolution & Grid, Sharpness, Noise,
+    Exposure, Motion Blur, Features & Vignetting, Clipping, Exposure &
+    WB Consistency, Ingestion) + 10 boolean toggles as checkboxes.
+  - **Overlap** – `sift_n_features` / `sift_ratio` / `sift_ransac_px`
+    as plain value fields (same ranges as before).
+- **Live apply** – every change is written into `DEFAULT_CONFIG`
+  immediately (workers read it at run time); changing `blur_threshold`
+  also moves the stats histogram threshold tick
+  (`StatsPanel.set_threshold`).
+- **Persistence** – values stored under `ui/config/<name>` in QSettings;
+  *Reset to Defaults* restores the `AnalysisConfig` factory defaults
+  (captured from a fresh instance, immune to live mutations).
+- **Old SIFT parameter bar above the preview removed** – the same
+  controls now live on the Overlap settings page (single source of
+  truth); the redundant `DEFAULT_CONFIG.sift_*` push in
+  `_start_analysis` is gone.
+- `overlap_check` deliberately stays as the toolbar "Overlap-Check"
+  checkbox (not duplicated in the panel).
+- Sliders inherit the existing `QSlider { background: transparent; }`
+  fix from `styles.py` – no gray box behind the new sliders.
+- **`QScrollArea` theme fix** (`styles.py`): the scroll-area viewport
+  (plain QWidget) was painted with the light Windows palette – a light
+  box in the dark theme. Viewport + page are now `transparent` (scoped
+  to `QScrollArea`, no global `QWidget` rule) so the tab-pane theme
+  background shows through.
+
+### GUI polish – sliders & dark-mode table readability
+
+- **Slider "gray box" fixed** (`styles.py`): a gray rectangle was painted
+  behind every `QSlider` (CPU Cores, Quality Threshold, Metashape
+  threshold) in both themes. Root cause: without a `background`
+  declaration on the `QSlider` widget itself, Qt paints the whole widget
+  rectangle with the native Windows base color (`#efefef`). Setting
+  `QSlider { background: transparent; }` makes the widget area truly
+  transparent so the toolbar background shows through; the track is then
+  defined purely by the sub-control rules (6 px groove, accent sub-page,
+  theme-colored add-page, 14 px handle). Verified by pixel probes
+  (above/below the track = fully transparent in dark and light).
+- **Dark-mode table readability** (`ui/table_model.py`, `ui/main_window.py`):
+  quality/status/overlap cells use light pastel fills (green/yellow/red)
+  but inherited white dark-theme text. They now get explicit dark text
+  (`#1c1f24`) so they are readable in both themes.
+
+### English localization
+
+- **Full German → English port** of all user-facing text, log messages,
+  dialogs, status values, and code comments/docstrings across the whole
+  project (UI tabs, workers, engines, `config.py` / `metrics.py` /
+  `scoring.py`, `README.md`, `CHANGELOG.md`, `styles.py`).
+- **Status values** unified to English and kept consistent between engine
+  and UI: `missing` · `present` · `copied` · `moved` · `skipped` ·
+  `unknown`; media type `photo` / `video`; date source `exif` /
+  `filesystem`.
+- German identifiers/comments cleaned up (e.g. local variable
+  `aufnahme_files` → `shooting_files`, layout `pfade` → `paths_lay`).
+- `differenzen_report.csv` filename kept (referenced in code + docs);
+  only its CSV header row is now English.
+
+### IGOR integration – file tools & design system
+
+- **Four new top-level tabs** (integrated from the IGOR project, ported
+  PySide6 → PyQt5):
+  - **Compare** – Shooting days vs. Ingest_Backup reconciliation: missing
+    media detection (name + size, optional SHA-256), EXIF metadata via
+    ExifTool (chunked batches, **SQLite-cached** for incremental
+    rescans), subfolder planning (date/focal/model/lens/media), rename
+    with prefix/suffix/EXIF name parts, *Refresh* (replan without
+    rescanning), manual Copy/Move transfer with CSV + JSON reports.
+  - **Rename** – RAW→JPG name matching by camera base ID, analyze +
+    execute (dry-run, overwrite).
+  - **Sort** – Reality-Capture `.imagelist` → per-component folders
+    (copy or move).
+  - **Metashape** – `.psx` quality-score filter (threshold slider,
+    trash/move/delete) + orphaned-RAW cleanup.
+- **Design system** (`styles.py`): darktable-inspired **dark theme**
+  (default) + light variant, applied app-wide; switchable under
+  *Settings → Dark/Light Theme*, persisted via QSettings.
+- New modules: `tools/` package (engines + workers), `ui/compare_tab.py`,
+  `ui/rename_tab.py`, `ui/sort_tab.py`, `ui/metashape_tab.py`,
+  `ui/log_panel.py`, `ui/path_row.py`.
+- `send2trash` added as optional dependency (Metashape trash mode;
+  falls back to a direct delete when missing).
+- Fixed inherited `PathRow.set_path()` bug in the Metashape tab
+  (now `set_value()`).
+
 ### Phase 1 – Ingestion & EXIF
 
 - **RAW decoding** (`.dng .cr2 .nef .arw …`) via `rawpy` (optional dep,
@@ -50,14 +142,14 @@ All notable changes to IgorVision. Format loosely follows
 - Preview now loads the **full-resolution** file (was: 128 px table
   thumbnail) so zooming stays sharp; very large files are decoded with a
   soft cap to keep memory/decode time sane.
-- Zoom toolbar above the preview: `+` / `−` buttons, **Zentrieren**
-  (re-centre), **Passend** (fit to view), and a zoom **dropdown** with
+- Zoom toolbar above the preview: `+` / `−` buttons, **Center**
+  (re-centre), **Fit** (fit to view), and a zoom **dropdown** with
   presets **25 % / 50 % / 100 % / 200 % / 300 %** (100 % = 1:1 pixels).
 - `ImageViewer` gains `zoom_in` / `zoom_out` / `zoom_to` / `center_image`
   / `reset_view` / `current_zoom_percent` and a `zoom_changed` signal that
   keeps the combo in sync; mouse-wheel zoom stays anchored under the cursor.
 
-### Phase 3 – Belichtung & Weißabgleich (Belichtung & WB)
+### Phase 3 – Exposure & White Balance (Exposure & WB)
 
 - **Exposure consistency** (`Expo drift`): per-image EXIF **EV100**
   (`EV = log2(N² / (t · ISO/100))`) vs. the set's robust median (≥ 3
@@ -87,8 +179,8 @@ All notable changes to IgorVision. Format loosely follows
 
 - New **additive "Soft (Motion)" 🟡 warning** for images the motion-blur
   detector flags as *real* (both cues, AND) but not strong enough to push
-  the score below `blur_threshold` – captures that are **"minimal
-  verrissen"** (slight camera shake at capture) and would otherwise still
+  the score below `blur_threshold` – captures that are **"slightly
+  smeared"** (slight camera shake at capture) and would otherwise still
   read "Sharp". **Warning only, never a reject.**
 - Calibrated on the Staatsgalerie Raum13 set (536 Canon 45 MP images):
   genuine slight-blur fires ~0.47 while weak directional-texture fires
@@ -166,14 +258,14 @@ All notable changes to IgorVision. Format loosely follows
   bar 0→100 %), then the overlap check (sequential, progress bar resets
   to 0→100 % with "Overlap: n/total" label).  The overlap checkbox in
   the toolbar toggles the second phase independently.
-- **Overlap tab** (left panel): new tab next to "Qualität" showing all
+- **Overlap tab** (left panel): new tab next to "Quality" showing all
   frames in capture (path-sorted) order with columns: #, Filename,
   Overlap %, Matches, Inlier %.  Overlap cells are colour-coded:
   red < 30 % (too little for SfM), green 30–90 % (sweet spot),
   blue > 90 % (highly redundant).  Row selection loads the image into
   the preview + info panel.
 - **Left panel tabs**: the table area is now a `QTabWidget` with
-  "Qualität" (existing quality-sorted table + filters) and "Overlap"
+  "Quality" (existing quality-sorted table + filters) and "Overlap"
   (capture-ordered sequence).  Both tabs share the right-side preview.
 - **Performance**: ~350–400 ms per pair (SIFT + FLANN) → ~75–85 s
   for 210 frames, ~2 min for 1500 frames.  Sequential, at most two

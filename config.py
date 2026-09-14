@@ -65,7 +65,7 @@ class AnalysisConfig:
     min_brightness: float = 22.0  # mean below this → underexposed
     max_brightness: float = 232.0  # mean above this → overexposed
 
-    # --- motion blur (Bewegungsunschärfe / camera shake) ----------------
+    # --- motion blur (camera shake) ----------------
     # The plain Laplacian score is direction-blind: on strongly textured
     # images (thatch, bark, reeds) it stays high even when the camera
     # shook, because edges parallel to the motion survive the smear.

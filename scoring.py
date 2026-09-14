@@ -126,7 +126,7 @@ def apply_motion_blur_penalty(
     config: AnalysisConfig,
 ) -> tuple[float, float]:
     """
-    Multiplicative penalty for camera shake (Bewegungsunschärfe).
+    Multiplicative penalty for camera shake.
 
     Each cue is mapped to an evidence fraction in [0, 1] (linear
     between its ``good`` and ``bad`` calibration values); the two

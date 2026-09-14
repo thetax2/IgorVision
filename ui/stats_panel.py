@@ -58,6 +58,11 @@ class _Histogram(QWidget):
         self._counts = [float(c) for c in counts]
         self.update()
 
+    def set_threshold(self, threshold: float) -> None:
+        """Move the threshold tick + bar colouring (live config change)."""
+        self._threshold = threshold
+        self.update()
+
     def paintEvent(self, _ev) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, False)
@@ -129,6 +134,10 @@ class StatsPanel(QWidget):
     # ------------------------------------------------------------------
     # public API
     # ------------------------------------------------------------------
+
+    def set_threshold(self, threshold: float) -> None:
+        """Update the histogram threshold tick (live config change)."""
+        self._hist.set_threshold(threshold)
 
     def set_results(self, results: list[ImageQualityMetrics]) -> None:
         ok = [r for r in results if not r.is_error]

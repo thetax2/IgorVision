@@ -87,7 +87,7 @@ def compute_block_metrics(
 
 
 # ---------------------------------------------------------------------------
-# motion blur (Bewegungsunschärfe) – direction-independent detection
+# motion blur (camera shake) – direction-independent detection
 # ---------------------------------------------------------------------------
 
 MB_N_ANGLES = 48
