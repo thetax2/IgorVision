@@ -63,9 +63,6 @@ In addition to the quality analysis, IgorVision bundles five file tools
 | **Metashape** | Phase 1: reads `Image/Quality` from an Agisoft Metashape `.psx` project and removes JPGs below a threshold slider (trash / `_removed/` / delete). Phase 2: finds orphaned RAWs (no matching JPG) and moves them to the trash. |
 | **RealityScan** | **Command centre** – a node-based pipeline editor for RealityCapture CLI. Add command nodes (170+ commands, grouped by category), edit their parameters, arrange them left → right (execution order), link them, and set free `%VARIABLES%`. Run directly against the exe (live log, abort, exit code, optional `writeProgress` polling) or export a portable `.bat`. Import existing `.bat` files, save / open pipelines as JSON, and load presets (e.g. *HighDetail RAW + Distances*). |
 
-## Screenshots
-
-_TODO: add 1–2 app screenshots (e.g. `docs/screenshot.png`) and reference them here._
 
 ## Architecture
 
