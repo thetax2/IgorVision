@@ -16,7 +16,7 @@ from tools.comparison import (
     CompareConfig,
     CancelledError,
     DiffResult,
-    check_exiftool,
+    exiftool_version,
     plan_destination,
     run_comparison,
     transfer_results,
@@ -119,19 +119,28 @@ class ExifToolCheckWorker(QThread):
     """
     Checks ExifTool availability in the background (`-ver` call),
     so that typing in the ExifTool field does not block the GUI.
+
+    Emits ``sig_done(ok, version)`` – the version string is empty when
+    the check failed.
     """
-    sig_done = pyqtSignal(bool)
+    sig_done = pyqtSignal(bool, str)
 
     def __init__(self, binary: str, parent=None):
         super().__init__(parent)
         self._binary = binary
 
     def run(self) -> None:
+        version = ""
         try:
-            ok = bool(self._binary) and check_exiftool(self._binary)
+            if self._binary:
+                version = exiftool_version(self._binary)
+                ok = bool(version)
+            else:
+                ok = False
         except Exception:
             ok = False
-        self.sig_done.emit(ok)
+            version = ""
+        self.sig_done.emit(ok, version)
 
 
 class TransferWorker(QThread):

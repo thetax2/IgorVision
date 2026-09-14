@@ -8,7 +8,7 @@ import logging
 import os
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QPixmap
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -29,13 +29,9 @@ HEADERS = [
     "Dimensions",
 ]
 
-# Colour constants for score coding (light pastel fills)
-_BG_GOOD = QColor(200, 255, 200)
-_BG_WARN = QColor(255, 255, 200)
-_BG_BAD = QColor(255, 200, 200)
-# Dark text used on the light pastel fills so it stays readable in both the
-# dark and the light theme (the white dark-theme text is unreadable on them).
-_FG_ON_LIGHT = QColor(28, 31, 36)
+# Quality is signalled by the status circle (🟢 / 🟡 / 🔴) in the Status
+# column only – no row / cell background fills (they were harsh on the eyes
+# in the dark theme).  The table keeps its subtle alternating row colours.
 
 # Role that carries the image path on every row (used to resolve results
 # independent of the table's visual sort order).
@@ -123,16 +119,9 @@ class QualityTableModel:
         name_item.setData(PATH_ROLE, r.path)
         t.setItem(row, 1, name_item)
 
-        # --- quality score (colour-coded) ---
+        # --- quality score (plain; the status circle is the colour marker) ---
         q_item = QTableWidgetItem(f"{r.composite_score:.3f}")
         q_item.setData(Qt.UserRole, r.composite_score)
-        if r.composite_score > 0.7:
-            q_item.setBackground(_BG_GOOD)
-        elif r.composite_score > 0.4:
-            q_item.setBackground(_BG_WARN)
-        else:
-            q_item.setBackground(_BG_BAD)
-        q_item.setForeground(_FG_ON_LIGHT)
         t.setItem(row, 2, q_item)
 
         # --- status (blur + exposure + photogrammetry checks) ---
@@ -150,15 +139,6 @@ class QualityTableModel:
                f" · overlap {r.overlap_next * 100:.0f}%" if r.overlap_next >= 0 else "")
         )
         s_item.setToolTip(f"{base_tip} · {r.load_note}" if r.load_note else base_tip)
-        if r.is_error or r.is_blurry:
-            s_item.setBackground(_BG_BAD)
-            s_item.setForeground(_FG_ON_LIGHT)
-        elif (not r.exposure_ok or not r.clipping_ok or r.low_features or r.duplicate_of
-              or r.exposure_outlier or r.wb_outlier or r.low_dynamic_range
-              or r.high_iso or r.aperture_outlier or r.soft_motion_blur
-              or r.uneven_features or r.has_vignetting):
-            s_item.setBackground(_BG_WARN)
-            s_item.setForeground(_FG_ON_LIGHT)
         t.setItem(row, 3, s_item)
 
         # --- file size ---

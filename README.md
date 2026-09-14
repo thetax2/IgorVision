@@ -13,7 +13,8 @@ python main.py
 ## Features
 
 - Folder or file selection, recursive scanning (optional)
-- CPU-core slider (multiprocessing via `ProcessPoolExecutor`)
+- CPU-core selection (multiprocessing via `ProcessPoolExecutor`) –
+  set under **Settings → Preferences** (Auto / 1…N cores)
 - Progress bar + abort
 - Results table with thumbnails, colour-coded score, status
   (🟢 Sharp / 🔴 Blurry / 🟡 Soft (Motion) · Exposure · Clipping · Few Features
@@ -42,6 +43,10 @@ python main.py
   (55 columns including all photogrammetry, exposure/WB, and EXIF fields)
 - **Theme**: darktable-inspired **dark theme** (default) and a light
   variant – switch under *Settings → Dark/Light Theme* (persisted)
+- **Preferences** (*Settings → Preferences*): program-wide settings –
+  CPU cores for the analysis and the **ExifTool** executable path
+  (Browse / Auto-detect / live version check). ExifTool feeds the
+  Compare tab's EXIF metadata (capture date, focal length, camera model)
 - **Settings panel** (right of the preview): tab-aware live tuning of
   every `config.py` parameter – *Quality* page: all 28 numeric
   parameters as slider + value field (grouped by section) plus 10
@@ -81,6 +86,7 @@ In addition to the quality analysis, IgorVision bundles five file tools
 | `ui/table_model.py` | Results table (colour coding, status via `status_text`) |
 | `ui/stats_panel.py` | **Batch statistics** (Phase 2): counts + 24-bin histogram + best/worst |
 | `ui/settings_panel.py` | **Tab-aware settings panel**: live tuning of all `config.py` parameters (Quality sliders + Overlap SIFT fields), QSettings persistence, reset to defaults |
+| `ui/preferences_dialog.py` | **Program-wide preferences** (Settings → Preferences): CPU cores (`prefs/cores`) + ExifTool path (`prefs/exiftool`) with Browse / Auto-detect / live version check |
 | `ui/image_viewer.py` | Preview viewer (full resolution, `zoom_in` / `zoom_out` / `zoom_to` / `center_image` / `reset_view`, `zoom_changed` signal) |
 | `ui/preview_dialog.py` | Full-screen preview |
 | `tools/comparison.py` | **Compare engine** (Qt-free): scan, index, EXIF metadata, destination planning, transfer |
@@ -340,3 +346,7 @@ pip install rawpy pillow-heif
 ## License & Version History
 
 AGPL-3.0 – see [`LICENSE`](LICENSE). Changes in [`CHANGELOG.md`](CHANGELOG.md).
+
+Versioning follows the `Backup/IgorVision_vX.Y.zip` scheme – small
+increments (v0.6 → v0.7), big jumps only at user-defined milestones.
+Current version: **v0.7**.

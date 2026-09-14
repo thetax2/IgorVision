@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import os
 
-from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen, QBrush, QFont, QTransform, QPainterPath
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGraphicsEllipseItem,
@@ -53,6 +54,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -96,6 +98,16 @@ _PORT_R = 7.0
 def _cat_color(command: str) -> str:
     spec = spec_for(command)
     return CATEGORY_COLORS.get(spec.category if spec else "", "#6a6a6a")
+
+
+def _is_folder_param(name: str) -> bool:
+    """Heuristic: does this path parameter point at a *folder*?"""
+    n = name.lower()
+    if "folder" in n or "directory" in n or n.endswith("dir"):
+        return True
+    if n in ("frames",):  # importVideo: folder with extracted frames
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +212,7 @@ class CommandNode(QGraphicsProxyWidget):
             self._title.setToolTip(spec.description)
         lay.addWidget(self._title)
 
-        # parameters (uniform QLineEdit; choices shown in placeholder)
+        # parameters (typed widgets per ParamSpec.kind + path browse)
         if spec and spec.params:
             for ps in spec.params:
                 row = QHBoxLayout()
@@ -211,17 +223,29 @@ class CommandNode(QGraphicsProxyWidget):
                 tip = ps.description
                 if ps.kind == "choice" and ps.choices:
                     tip = (tip + "  " if tip else "") + " / ".join(ps.choices)
+                if ps.kind == "path":
+                    tip = (tip + "  " if tip else "") + (
+                        "(folder)" if _is_folder_param(ps.name) else "(file)")
                 lbl.setToolTip(tip)
-                edit = QLineEdit()
-                edit.setStyleSheet("font-size: 11px;")
-                placeholder = ps.description or ps.name
-                if ps.kind == "choice" and ps.choices:
-                    placeholder = " / ".join(ps.choices)
-                edit.setPlaceholderText(placeholder)
-                edit.setText(str(params.get(ps.name, "")))
+                edit = self._make_param_widget(ps, params)
                 row.addWidget(lbl, 1)
                 row.addWidget(edit, 2)
                 self._edits[ps.name] = edit
+                if ps.kind == "path":
+                    is_dir = _is_folder_param(ps.name)
+                    browse = QPushButton()
+                    browse.setFixedSize(30, 26)
+                    browse.setToolTip(
+                        "Select folder…" if is_dir else "Select file…")
+                    icon = self._browse_icon(is_dir)
+                    if icon is not None:
+                        browse.setIcon(icon)
+                        browse.setIconSize(QSize(16, 16))
+                    else:
+                        browse.setText("…")  # safe fallback glyph
+                    browse.clicked.connect(
+                        lambda _=False, e=edit, p=ps: self._browse(p, e))
+                    row.addWidget(browse)
                 lay.addLayout(row)
         else:
             hint = QLabel("(no parameters)")
@@ -265,17 +289,163 @@ class CommandNode(QGraphicsProxyWidget):
     def port(self, kind: str):
         return self._port_in if kind == "in" else self._port_out
 
+    # ── typed parameter widgets ──────────────────────────────────────
+    @staticmethod
+    def _make_param_widget(ps, params: dict):
+        """Build the editor widget for one parameter based on its kind.
+
+        ``text`` / ``path`` → :class:`QLineEdit` (path gets a browse
+        button in the row), ``choice`` → editable combo, ``bool`` →
+        checkbox, ``number`` → spin box.
+        """
+        value = str(params.get(ps.name, ""))
+        if ps.kind == "choice":
+            combo = QComboBox()
+            combo.setEditable(True)  # allow values outside the list too
+            combo.addItems(list(ps.choices))
+            if value:
+                combo.setEditText(value)
+            elif ps.choices:
+                combo.setCurrentIndex(0)
+            combo.setStyleSheet("font-size: 11px;")
+            if ps.description:
+                combo.setToolTip(ps.description)
+            return combo
+        if ps.kind == "bool":
+            chk = QCheckBox("true")
+            chk.setChecked(value.strip().lower() in ("true", "1", "yes", "on"))
+            chk.setStyleSheet("color: #cfcfcf; font-size: 11px;")
+            if ps.description:
+                chk.setToolTip(ps.description)
+            return chk
+        if ps.kind == "number":
+            spin = QDoubleSpinBox()
+            spin.setRange(-999999.0, 999999.0)
+            spin.setSingleStep(1.0)
+            try:
+                fv = float(value)
+                spin.setDecimals(0 if fv == int(fv) else 3)  # before setValue!
+                spin.setValue(fv)
+            except ValueError:
+                pass
+            spin.setStyleSheet("font-size: 11px;")
+            if ps.description:
+                spin.setToolTip(ps.description)
+            return spin
+        # text / path → editable line edit (path gets a browse button)
+        edit = QLineEdit()
+        edit.setStyleSheet("font-size: 11px;")
+        placeholder = ps.description or ps.name
+        if ps.kind == "choice" and ps.choices:
+            placeholder = " / ".join(ps.choices)
+        edit.setPlaceholderText(placeholder)
+        edit.setText(value)
+        return edit
+
+    def _dialog_parent(self):
+        """A proper top-level window to parent file dialogs to.
+
+        In this PyQt5 build the node's inner widget is a *top-level*
+        ``QWidget`` (``setWidget`` does not reparent it into the view), so
+        using it as a dialog parent makes Qt create a stray native helper
+        window that shows up as a small empty "Qt" window next to the node
+        on Windows.  Walk up to the real top-level window (the main window)
+        via the scene's view instead.
+        """
+        try:
+            views = self._scene.views()
+            if views:
+                top = views[0].window()
+                if top is not None and top.isWindow():
+                    return top
+        except Exception:
+            pass
+        top = self._w.window()
+        if top is not None and top is not self._w and top.isWindow():
+            return top
+        try:
+            from PyQt5.QtWidgets import QApplication
+            aw = QApplication.activeWindow()
+            if aw is not None:
+                return aw
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _browse_icon(is_dir: bool):
+        """Native folder / file icon for the browse button.
+
+        Emoji glyphs (📁/📄) are missing from the button's default font in
+        this build and render as a thin missing-glyph bar, so we use the
+        application style's standard icons instead.  Returns ``None`` when
+        no icon is available (the caller then falls back to a ``…`` text
+        button).  A ``@staticmethod`` so it can be called during node
+        construction before the proxy widget's C++ base is initialised.
+        """
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        style = app.style() if app is not None else None
+        if style is None:
+            return None
+        sp = QStyle.SP_DirIcon if is_dir else QStyle.SP_FileIcon
+        icon = style.standardIcon(sp)
+        return icon if not icon.isNull() else None
+
+    def _browse(self, ps, edit: QLineEdit) -> None:
+        """Open a folder / file dialog and write the choice into the field."""
+        start = edit.text().strip() or os.getcwd()
+        parent = self._dialog_parent()
+        if _is_folder_param(ps.name):
+            chosen = QFileDialog.getExistingDirectory(
+                parent, "Select folder", start)
+        else:
+            chosen, _ = QFileDialog.getOpenFileName(
+                parent, "Select file", start)
+        if chosen:
+            edit.setText(chosen)
+
     # ── values ───────────────────────────────────────────────────────
     def params(self) -> dict:
         out: dict[str, str] = {}
-        for name, edit in self._edits.items():
-            v = edit.text().strip()
-            out[name] = v
+        for name, w in self._edits.items():
+            out[name] = self._widget_value(w)
         return out
 
     def set_params(self, params: dict) -> None:
-        for name, edit in self._edits.items():
-            edit.setText(str(params.get(name, "")))
+        for name, w in self._edits.items():
+            self._set_widget_value(w, str(params.get(name, "")))
+
+    @staticmethod
+    def _widget_value(w) -> str:
+        if isinstance(w, QCheckBox):
+            return "true" if w.isChecked() else "false"
+        if isinstance(w, QDoubleSpinBox):
+            v = w.value()
+            if v == int(v):
+                return str(int(v))
+            return ("%.3f" % v).rstrip("0").rstrip(".")
+        if isinstance(w, QComboBox):
+            return w.currentText().strip()
+        if isinstance(w, QLineEdit):
+            return w.text().strip()
+        return str(w)
+
+    @staticmethod
+    def _set_widget_value(w, value: str) -> None:
+        if isinstance(w, QCheckBox):
+            w.setChecked(value.strip().lower() in ("true", "1", "yes", "on"))
+        elif isinstance(w, QDoubleSpinBox):
+            try:
+                fv = float(value)
+                w.setDecimals(0 if fv == int(fv) else 3)  # before setValue!
+                w.setValue(fv)
+            except ValueError:
+                pass
+        elif isinstance(w, QComboBox):
+            w.setEditText(value)
+        elif isinstance(w, QLineEdit):
+            w.setText(value)
 
     def itemChange(self, change, value):  # type: ignore[no-untyped-def]
         if change == QGraphicsItem.ItemPositionChange and self._scene is not None:
@@ -450,7 +620,8 @@ class NodeView(QGraphicsView):
         w = node._w
         local = node.mapFromScene(scene_pos)
         child = w.childAt(local.toPoint())
-        return isinstance(child, (QLineEdit, QCheckBox, QComboBox))
+        return isinstance(child, (QLineEdit, QCheckBox, QComboBox,
+                                  QPushButton, QDoubleSpinBox))
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if self._panning and self._pan_last is not None:
@@ -855,6 +1026,8 @@ class RealityScanTab(QWidget):
                 req = "yes" if ps.required else "opt."
                 color = "#e8c454" if ps.required else "#8a8a8a"
                 kind = esc(ps.kind)
+                if ps.kind == "path":
+                    kind = "folder" if _is_folder_param(ps.name) else "file"
                 if ps.choices:
                     kind += " (" + esc(" / ".join(ps.choices)) + ")"
                 tip = esc(ps.description) if ps.description else ""

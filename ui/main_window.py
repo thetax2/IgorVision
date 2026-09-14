@@ -218,8 +218,13 @@ class _AnalysisWorker(QObject):
 class MainWindow(QMainWindow):
     """Main IgorVision window with all user-facing functionality."""
 
-    # Signal for thread-safe keypoint visualisation (emitted from worker thread)
+    # Signals for thread-safe GUI updates from the standalone overlap scan
+    # (which runs on a raw Python thread).  They MUST be connected with
+    # Qt.QueuedConnection – see _connect_signals for why AutoConnection
+    # is not safe here.
     _keypoints_signal = pyqtSignal(str, object, int)  # (path, kpts_xy, matches)
+    _overlap_progress_signal = pyqtSignal(int, int, str)  # (done, total, path)
+    _overlap_done_signal = pyqtSignal(object)  # results list
 
     def __init__(self):
         super().__init__()
@@ -236,7 +241,9 @@ class MainWindow(QMainWindow):
         # persisted across sessions (see _load_settings / _save_settings)
         self._last_folder: str = ""
         self._last_files_dir: str = ""
-        self._filter_mode: str = "all"
+        # "slider" (quality threshold) is the default persistent filter; the
+        # old default "all" silently ignored the slider after each analysis.
+        self._filter_mode: str = "slider"
 
         self._setup_ui()
         self._connect_signals()
@@ -281,18 +288,7 @@ class MainWindow(QMainWindow):
         self._chk_recursive = QCheckBox("Include Subfolders")
         self._chk_recursive.setChecked(True)
 
-        # CPU cores
-        cores_box = QVBoxLayout()
-        cores_box.addWidget(QLabel("CPU Cores:"))
-        cores_row = QHBoxLayout()
-        self._cpu_count = mp.cpu_count()
-        self._cores_slider = QSlider(Qt.Horizontal)
-        self._cores_slider.setRange(1, self._cpu_count)
-        self._cores_slider.setValue(self._cpu_count)
-        self._cores_label = QLabel(str(self._cpu_count))
-        cores_row.addWidget(self._cores_slider)
-        cores_row.addWidget(self._cores_label)
-        cores_box.addLayout(cores_row)
+        # CPU cores now live in Settings → Preferences (program-wide).
 
         self._btn_start = QPushButton("🚀  Start Analysis")
         self._btn_stop = QPushButton("⏹  Stop")
@@ -306,7 +302,6 @@ class MainWindow(QMainWindow):
         self._chk_overlap = QCheckBox("Overlap-Check")
         self._chk_overlap.setChecked(True)
         toolbar.addWidget(self._chk_overlap)
-        toolbar.addLayout(cores_box)
         toolbar.addWidget(self._btn_start)
         toolbar.addWidget(self._btn_overlap_scan)
         toolbar.addWidget(self._btn_stop)
@@ -479,6 +474,10 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         m_settings = mb.addMenu("&Settings")
+        act_prefs = QAction("Preferences…", self)
+        act_prefs.triggered.connect(self._show_preferences)
+        m_settings.addAction(act_prefs)
+        m_settings.addSeparator()
         self._act_theme_dark = QAction("Dark Theme", self, checkable=True, checked=True)
         self._act_theme_light = QAction("Light Theme", self, checkable=True)
         self._act_theme_dark.triggered.connect(lambda: self._set_theme("dark"))
@@ -490,6 +489,21 @@ class MainWindow(QMainWindow):
         act_about = QAction("About IgorVision", self)
         act_about.triggered.connect(self._show_about)
         m_help.addAction(act_about)
+
+    def _show_preferences(self) -> None:
+        """Open the program-wide preferences dialog (Settings → Preferences)."""
+        from .preferences_dialog import PreferencesDialog
+
+        dlg = PreferencesDialog(self)
+        dlg.exec_()
+
+    def _worker_cores(self) -> int:
+        """CPU cores for the analysis (Settings → Preferences; 0 = auto)."""
+        try:
+            cores = int(QSettings().value("prefs/cores", 0) or 0)
+        except (TypeError, ValueError):
+            cores = 0
+        return cores if cores > 0 else mp.cpu_count()
 
     def _set_theme(self, theme: str) -> None:
         """Switch between the dark and light design (persisted via QSettings)."""
@@ -519,11 +533,20 @@ class MainWindow(QMainWindow):
         self._btn_start.clicked.connect(self._start_analysis)
         self._btn_stop.clicked.connect(self._stop_analysis)
         self._btn_overlap_scan.clicked.connect(self._start_overlap_scan)
-        self._keypoints_signal.connect(self._on_keypoints_visualize)
 
-        self._cores_slider.valueChanged.connect(
-            lambda v: self._cores_label.setText(str(v))
-        )
+        # The standalone overlap scan runs on a *raw Python thread* (not a
+        # QThread).  For such threads QThread::currentThread() reports the
+        # MAIN thread, so AutoConnection would pick DirectConnection and the
+        # slots would execute on the worker thread – touching the
+        # QGraphicsScene / progress bar off the GUI thread while the GUI
+        # thread paints → "Recursive repaint detected" → crash.
+        # QueuedConnection posts the slots to the GUI event loop instead.
+        self._keypoints_signal.connect(
+            self._on_keypoints_visualize, Qt.QueuedConnection)
+        self._overlap_progress_signal.connect(
+            self._on_overlap_scan_progress, Qt.QueuedConnection)
+        self._overlap_done_signal.connect(
+            self._on_overlap_scan_done, Qt.QueuedConnection)
 
         self._quality_slider.valueChanged.connect(self._update_quality_filter)
         self._btn_show_all.clicked.connect(lambda: self._filter_results("all"))
@@ -603,7 +626,7 @@ class MainWindow(QMainWindow):
 
         # Start background analysis
         self._stop_event = threading.Event()
-        num_workers = self._cores_slider.value()
+        num_workers = self._worker_cores()
         do_overlap = self._chk_overlap.isChecked()
 
         # Note: SIFT / quality parameters are applied live by the
@@ -668,6 +691,9 @@ class MainWindow(QMainWindow):
         self._table_model.set_results(results)
         self._stats.set_results(results)
         self._populate_overlap_table(results)
+        # Re-apply the active filter so it is never dropped when new
+        # results arrive (the quality-threshold slider persists).
+        self._apply_active_filter()
 
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
@@ -731,24 +757,17 @@ class MainWindow(QMainWindow):
         stop_event = threading.Event()
         self._overlap_stop = stop_event
 
-        # Callbacks (called from worker thread – use signals for GUI updates)
+        # Callbacks are called from the worker thread.  Only signal
+        # emission is thread-safe here – the connected slots (queued to
+        # the GUI event loop, see _connect_signals) do all widget work.
         def _on_keypoints(path: str, kpts: np.ndarray, matches: int) -> None:
             self._keypoints_signal.emit(path, kpts, matches)
 
         def _on_progress(done: int, total: int, path: str) -> None:
-            # Safe: Qt widget methods are thread-safe for simple setters
-            self._progress.setValue(int(done / total * 1000) if total > 0 else 0)
-            self._progress_label.setText(
-                f"Overlap Scan: {done}/{total}  →  {os.path.basename(path)}"
-            )
+            self._overlap_progress_signal.emit(done, total, path)
 
         def _on_finished(results) -> None:
-            self._populate_overlap_table(self._results)
-            self._btn_overlap_scan.setEnabled(True)
-            self._btn_start.setEnabled(True)
-            self._progress.setValue(1000)
-            self._progress_label.setText("Overlap Scan: Done")
-            self.statusBar().showMessage("Overlap scan complete.")
+            self._overlap_done_signal.emit(results)
 
         worker = OverlapScanWorker(self._results, stop_event)
         worker.on_keypoints = _on_keypoints
@@ -766,34 +785,64 @@ class MainWindow(QMainWindow):
               f"y:[{kpts[:,1].min():.0f}-{kpts[:,1].max():.0f}])")
         self._viewer.show_keypoints(path, kpts)
 
+    def _on_overlap_scan_progress(self, done: int, total: int, path: str) -> None:
+        """GUI-thread slot for the standalone overlap scan progress
+        (queued from the worker thread – see _connect_signals)."""
+        self._progress.setValue(int(done / total * 1000) if total > 0 else 0)
+        self._progress_label.setText(
+            f"Overlap Scan: {done}/{total}  →  {os.path.basename(path)}"
+        )
+
+    def _on_overlap_scan_done(self, results) -> None:
+        """GUI-thread slot for the standalone overlap scan finishing
+        (queued from the worker thread – see _connect_signals)."""
+        self._populate_overlap_table(self._results)
+        self._btn_overlap_scan.setEnabled(True)
+        self._btn_start.setEnabled(True)
+        self._progress.setValue(1000)
+        self._progress_label.setText("Overlap Scan: Done")
+        self.statusBar().showMessage("Overlap scan complete.")
+
     # ==================================================================
     # table filtering
     # ==================================================================
 
     def _update_quality_filter(self, value: int) -> None:
-        threshold = value / 100.0
-        self._quality_label.setText(f"{threshold:.2f}")
-        self._apply_quality_filter(threshold)
+        self._filter_mode = "slider"
+        self._quality_label.setText(f"{value / 100.0:.2f}")
+        self._apply_active_filter()
 
-    def _apply_quality_filter(self, threshold: float) -> None:
+    def _apply_active_filter(self) -> None:
+        """Apply the currently active filter to the results table.
+
+        ``_filter_mode`` is one of:
+        * ``"slider"`` – hide rows whose score is below the quality
+          threshold slider (the default, persistent filter).
+        * ``"all"``    – show every row.
+        * ``"blurry"`` – show only the worst (``is_blurry``) rows.
+
+        Called whenever the slider moves, a filter button is pressed, and
+        – importantly – after every analysis finishes, so the active
+        filter is never silently dropped when new results arrive.
+        """
         t = self._table
         for row in range(t.rowCount()):
-            item = t.item(row, 2)
-            if item is None:
-                continue
-            score = item.data(Qt.UserRole)
-            if score is not None:
-                t.setRowHidden(row, score < threshold)
+            if self._filter_mode == "all":
+                t.setRowHidden(row, False)
+            elif self._filter_mode == "blurry":
+                r = self._result_at_row(row)
+                t.setRowHidden(row, r is None or not r.is_blurry)
+            else:  # "slider" (default) – hide rows below the threshold
+                item = t.item(row, 2)
+                if item is None:
+                    continue
+                score = item.data(Qt.UserRole)
+                if score is not None:
+                    t.setRowHidden(row, score < self._quality_slider.value() / 100.0)
 
     def _filter_results(self, filter_type: str) -> None:
         self._filter_mode = filter_type
-        t = self._table
-        for row in range(t.rowCount()):
-            if filter_type == "all":
-                t.setRowHidden(row, False)
-            elif filter_type == "blurry":
-                r = self._result_at_row(row)
-                t.setRowHidden(row, r is None or not r.is_blurry)
+        self._apply_active_filter()
 
     # ==================================================================
     # preview & info
@@ -1191,7 +1240,9 @@ class MainWindow(QMainWindow):
             if state is not None:
                 self._splitter.restoreState(bytes(state))
 
-            self._cores_slider.setValue(int(s.value("ui/cores", self._cpu_count)))
+            # migrate the old toolbar CPU-cores setting into Preferences
+            if s.value("prefs/cores") is None and s.value("ui/cores") is not None:
+                s.setValue("prefs/cores", int(s.value("ui/cores")))
             self._chk_recursive.setChecked(_as_bool(s.value("ui/recursive"), True))
             self._chk_overlap.setChecked(_as_bool(s.value("ui/overlap_check"), True))
             self._quality_slider.setValue(int(s.value("ui/quality_threshold", 50)))
@@ -1211,17 +1262,26 @@ class MainWindow(QMainWindow):
                 self._right_split.restoreState(bytes(state))
             self._last_folder = str(s.value("ui/last_folder", "") or "")
             self._last_files_dir = str(s.value("ui/last_files_dir", "") or "")
-            self._filter_mode = str(s.value("ui/filter_mode", "all") or "all")
-            if self._filter_mode not in ("all", "blurry"):
-                self._filter_mode = "all"
+            self._filter_mode = str(s.value("ui/filter_mode", "slider") or "slider")
+            if self._filter_mode not in ("slider", "all", "blurry"):
+                self._filter_mode = "slider"
+            # The old shipped default was "all" (which ignored the slider).
+            # Migrate it to "slider" so the quality threshold works out of
+            # the box; "Show All" remains a one-click button in the UI.
+            if self._filter_mode == "all":
+                self._filter_mode = "slider"
+                s.setValue("ui/filter_mode", "slider")
 
             theme = str(s.value("ui/theme", "dark") or "dark")
             if theme not in ("dark", "light"):
                 theme = "dark"
             self._set_theme(theme)
 
-            # keep label + (empty) table in sync with the restored threshold
-            self._update_quality_filter(self._quality_slider.value())
+            # keep the label in sync with the restored threshold and apply
+            # the active filter (respecting the loaded _filter_mode – do NOT
+            # force it back to "slider" here).
+            self._quality_label.setText(f"{self._quality_slider.value() / 100.0:.2f}")
+            self._apply_active_filter()
         except Exception:
             logger.exception("Failed to restore settings – using defaults")
 
@@ -1231,7 +1291,6 @@ class MainWindow(QMainWindow):
         try:
             s.setValue("ui/window_geometry", self.saveGeometry())
             s.setValue("ui/splitter_state", self._splitter.saveState())
-            s.setValue("ui/cores", self._cores_slider.value())
             s.setValue("ui/recursive", self._chk_recursive.isChecked())
             s.setValue("ui/overlap_check", self._chk_overlap.isChecked())
             s.setValue("ui/quality_threshold", self._quality_slider.value())

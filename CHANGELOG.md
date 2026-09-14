@@ -3,7 +3,69 @@
 All notable changes to IgorVision. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/) – date + short entries.
 
-## Unreleased
+Versioning follows the `Backup/IgorVision_vX.Y.zip` scheme –
+small increments, big jumps only at user-defined milestones.
+
+## v0.7 – 2026-09-14
+
+### Crash fix – standalone overlap scan (recursive repaint)
+
+- **Fixed a crash** when switching tabs / moving the window during the
+  standalone overlap scan (`QWidget::repaint: Recursive repaint detected`
+  → abort).  Root cause: the scan runs on a *raw Python thread*, and for
+  such threads `QThread::currentThread()` reports the **main** thread, so
+  `AutoConnection` picked `DirectConnection` – the keypoint slot (and the
+  progress / finished callbacks) executed **on the worker thread**, touching
+  the `QGraphicsScene` / progress bar / results table off the GUI thread
+  while the GUI thread was painting.
+- Fix: all three callbacks now only **emit signals** (thread-safe), and the
+  signals are connected with an explicit `Qt.QueuedConnection` so the slots
+  run on the GUI event loop.  Verified offscreen: a signal emitted from a
+  raw thread now delivers its slot on the main thread (progress bar updates
+  correctly, no cross-thread widget access).
+
+### Quality table – calmer colours + working threshold filter
+
+- **Row / cell background fills removed** from the results table (the
+  green / yellow / red pastels on the Quality and Status columns were
+  harsh on the eyes in the dark theme).  Quality is now signalled by the
+  status circle only (🟢 Sharp / 🟡 warning / 🔴 blurry / ⚫ error) – the
+  table keeps its subtle alternating row colours.  `ui/table_model.py`
+  no longer sets per-cell backgrounds.
+- **Quality-threshold slider now actually filters** (bug fix): the active
+  filter is re-applied after *every* analysis, so it is no longer silently
+  dropped when new results arrive.  The filter state is unified into a
+  single `_filter_mode` (``slider`` / ``all`` / ``blurry``) applied by
+  `_apply_active_filter()`.
+  - The **default filter is now the slider** (the old default ``all``
+    silently ignored the threshold and is migrated to ``slider`` on first
+    launch), so the quality threshold works out of the box.
+  - **“Show Blurry Only”** is unchanged – it still shows only the worst
+    (`is_blurry`) rows; **“Show All”** shows every row.
+
+### Preferences – program-wide settings (Settings → Preferences)
+
+- **New “Preferences…” entry at the top of the Settings menu** opening a
+  dialog (`ui/preferences_dialog.py`) for settings that apply to the whole
+  application, as opposed to the per-tab “Quality Settings” panel.
+- **CPU cores moved out of the Quality toolbar** into Preferences →
+  *Performance*: a combo (“Auto (N cores)” + 1…N) persisted to
+  `prefs/cores` (0 = auto → all cores). The old toolbar slider is gone;
+  a previously saved `ui/cores` value is migrated to `prefs/cores` on
+  first launch. The analysis worker now reads the core count from the
+  global preference.
+- **ExifTool is now a program-wide setting** (Preferences → *ExifTool*):
+  path to `exiftool.exe` + **Browse** + **Auto-detect** (PATH + common
+  install locations) + a live availability check showing the version
+  (`✓ ExifTool 12.95` / `✗ not found`). Persisted to `prefs/exiftool`.
+  - The ExifTool row is **removed from the Compare tab** – it now reads
+    the global setting (falling back to auto-detection), so there is a
+    single source of truth instead of a per-tab duplicate.
+  - `detect_exiftool()` / `exiftool_version()` moved into the Qt-free
+    engine (`tools/comparison.py`); `ExifToolCheckWorker` now also emits
+    the version string.
+
+## v0.6 – 2026-09-14
 
 ### RealityScan command centre – node-based pipeline editor (new tab)
 
@@ -40,6 +102,18 @@ All notable changes to IgorVision. Format loosely follows
     works as a shortcut.
   - Palette uses an explicit dark style (the app theme does not cover
     `QListWidget`).
+  - **Typed parameter fields:** node parameters now render per their
+    `ParamSpec.kind` instead of one uniform text field — `path` gets a
+    **browse button** showing a native folder / file icon (folder vs.
+    file inferred from the parameter name, e.g. `addFolder.folder` →
+    folder, `save.path` → file; a `…` text button is the fallback) that
+    opens the matching picker and bakes the chosen path straight into
+    the field, `choice` becomes an **editable dropdown** (no more
+    typos, custom values still allowed), `bool` a **checkbox**
+    (`true` / `false`), and `number` a **spin box** (clean integer /
+    decimal display). Fields stay editable — `%VARIABLE%` references
+    still work alongside baked paths; the browse button is excluded
+    from node-drag so clicking it never moves the node.
   - **Info / Paths tab group** (bottom-right, replaces the flat
     “Variables” panel): the *Info* tab live-documents the command
     currently selected in the palette — category, what it produces /
@@ -69,6 +143,19 @@ All notable changes to IgorVision. Format loosely follows
   - Initial view: `fit()` is guarded against a degenerate viewport and
     never zooms out below 50 % – long pipelines start at 100 % centred
     on the first node ("Fit view" stays an explicit button).
+  - `QGraphicsProxyWidget.setWidget()` does **not** reparent the inner
+    widget into the view – it stays a *top-level* `QWidget`
+    (`parentWidget()` is `None`, `isWindow()` is `True`). Using it as a
+    native file-dialog parent makes Qt create a stray helper window that
+    shows up as a small empty "Qt" window next to the node on Windows →
+    browse dialogs are parented to the scene view's top-level window
+    (`scene.views()[0].window()`, i.e. the main window) instead.
+  - Emoji glyphs (📁/📄, U+1F4C1/U+1F4C4) are missing from the button's
+    default font and render as a thin missing-glyph bar → browse buttons
+    use the style's native `SP_DirIcon` / `SP_FileIcon` (with a `…` text
+    fallback) instead of emoji.
+
+## v0.5 – 2026-09-14
 
 ### Tab structure – Overlap promoted to a top-level tab
 
@@ -136,6 +223,8 @@ All notable changes to IgorVision. Format loosely follows
   but inherited white dark-theme text. They now get explicit dark text
   (`#1c1f24`) so they are readable in both themes.
 
+## v0.4 – 2026-09-14
+
 ### English localization
 
 - **Full German → English port** of all user-facing text, log messages,
@@ -178,104 +267,7 @@ All notable changes to IgorVision. Format loosely follows
 - Fixed inherited `PathRow.set_path()` bug in the Metashape tab
   (now `set_value()`).
 
-### Phase 1 – Ingestion & EXIF
-
-- **RAW decoding** (`.dng .cr2 .nef .arw …`) via `rawpy` (optional dep,
-  `postprocess()` → sRGB uint8; EXIF from `raw.other` / `raw.lens`).
-- **HEIC/HEIF** via `pillow-heif` (optional dep); graceful "install …"
-  fallback note when the backend is missing or the file is corrupt.
-- **16-bit TIFF/RAW** normalised with `>> 8` so brightness/exposure
-  semantics stay correct.
-- **EXIF parsing** (Pillow, header-only): camera, aperture, **shutter**,
-  ISO, focal length, GPS, datetime – surfaced in the info panel and CSV.
-- **EXIF orientation applied** exactly once (portrait photos analysed
-  upright); `cv2.IMREAD_IGNORE_ORIENTATION` added to prevent the double
-  rotation OpenCV ≥ 4 otherwise performs on JPEGs.
-- **Slow-shutter corroboration**: flags `shutter > 1 / focal_length`
-  to sharpen motion-blur evidence (shown when a photo is also blurry).
-- **Fast decode** of very large files via `cv2.IMREAD_REDUCED_COLOR_*`
-  (50 MP JPEGs decode ~4–16× faster; pipeline only needs `analysis_dim`).
-- **MD5** computed from the decoded bytes (no extra read on the cv2 path)
-  → duplicate detection across the batch.
-
-### Phase 2 – SfM / photogrammetry checks
-
-- **Feature-density check** (Harris corners / 1 k px above an absolute
-  response threshold) – catches "sharp but feature-poor" images (sky,
-  plain wall, water, snow) that are useless for the reconstruction.
-- **Clipping check** – fraction of clipped highlights (any channel ≥ 253)
-  and crushed shadows (all channels ≤ 2).
-- **Duplicate (MD5) detection** – every file after the first of a hash
-  group is flagged and points at the original path.
-- **Batch statistics panel** – status counts, 24-bin score histogram with
-  threshold tick, and best/worst image (click → select in table).
-- **Status column** now combines blur + exposure + clipping + few features
-  + duplicate + slow shutter (shared `models.status_text`).
-- `build_export_rows()` extracted (Qt-free, testable) and shared by the
-  CSV export and the upcoming CLI/JSON output; CSV now carries all
-  quality, photogrammetry and EXIF fields (39 columns).
-- Tuning: `max_clip_low` raised 5 % → **25 %** (dark materials like thatch
-  carry 10–20 % crushed shadow without being underexposed);
-  `max_clip_high` stays 2 %.
-
-### Preview & zoom
-
-- Preview now loads the **full-resolution** file (was: 128 px table
-  thumbnail) so zooming stays sharp; very large files are decoded with a
-  soft cap to keep memory/decode time sane.
-- Zoom toolbar above the preview: `+` / `−` buttons, **Center**
-  (re-centre), **Fit** (fit to view), and a zoom **dropdown** with
-  presets **25 % / 50 % / 100 % / 200 % / 300 %** (100 % = 1:1 pixels).
-- `ImageViewer` gains `zoom_in` / `zoom_out` / `zoom_to` / `center_image`
-  / `reset_view` / `current_zoom_percent` and a `zoom_changed` signal that
-  keeps the combo in sync; mouse-wheel zoom stays anchored under the cursor.
-
-### Phase 3 – Exposure & White Balance (Exposure & WB)
-
-- **Exposure consistency** (`Expo drift`): per-image EXIF **EV100**
-  (`EV = log2(N² / (t · ISO/100))`) vs. the set's robust median (≥ 3
-  images with EXIF), with a **luminance-median fallback** when EXIF is
-  missing. Direct auto-exposure drift signal.
-- **White-balance consistency** (`WB drift`): white-point gain vector
-  (R/G, B/G from the per-channel 95th percentile – robust to clipped
-  highlights) vs. the set median; plus a **Kelvin estimate** (CIE-1931
-  chromaticity + McCamy) as a *directional* sanity check – an estimate,
-  not a lab value.
-- **Low dynamic range** (`Flat`): used tonal span (luma p95−p5) below
-  `min_dynamic_range` → washed out.
-- **ISO / aperture drift** (`Hi-ISO`, `Aperture drift`): relative to the
-  set median, in stops (noise + DoF/bokeh mismatch).
-- All five are **warnings (🟡)**, not hard rejects; **raw values always
-  exported** (CSV + info panel) for calibration. CSV grows to **54 columns**.
-- New `status_text` flags: Expo drift · WB drift · Flat · Hi-ISO · Aperture
-  drift; stats panel gains `expoΔ` / `wbΔ` / `isoΔ` chips; table tooltip
-  adds `≈ K · Δexpo · ΔWB` and the warn-background now covers the new flags.
-- Config: `exposure_consistency` / `wb_consistency` /
-  `low_dynamic_range_check` / `iso_consistency` / `aperture_consistency`
-  + thresholds (`exposure_outlier_ev` 0.5, `exposure_outlier_luma` 0.25,
-  `min_dynamic_range` 55, `wb_gain_dev_max` 0.15, `iso_dev_stops_max` 2.0,
-  `aperture_dev_stops_max` 0.5).
-
-### Phase 4 – "Soft (Motion)" warning tier
-
-- New **additive "Soft (Motion)" 🟡 warning** for images the motion-blur
-  detector flags as *real* (both cues, AND) but not strong enough to push
-  the score below `blur_threshold` – captures that are **"slightly
-  smeared"** (slight camera shake at capture) and would otherwise still
-  read "Sharp". **Warning only, never a reject.**
-- Calibrated on the Staatsgalerie Raum13 set (536 Canon 45 MP images):
-  genuine slight-blur fires ~0.47 while weak directional-texture fires
-  (herringbone floors, windows, radiators) stay at 0.15 or below – the
-  floor sits in that gap, so exactly one image is surfaced and the 27
-  genuinely-blurry images are unchanged.
-- Config: `motion_blur_soft_check` (default `True`) + `soft_mb_floor`
-  (default **0.20**). Lower the floor (e.g. `0.10`) to surface more
-  candidates; raise it to tighten.
-- UI: status column shows "Soft (Motion)" (🟡); the info panel shows it on
-  the motion-blur line; the stats panel gains a `soft` chip and excludes
-  soft images from the clean count; table rows get the warn background and
-  the tooltip now carries the MB penalty. CSV gains a `soft_motion_blur`
-  column (55 columns total); the raw `mb_*` values are unchanged.
+## v0.3 – 2026-09-13
 
 ### Phase 5 – Green Channel & Gradient Diagnostics
 
@@ -355,6 +347,109 @@ All notable changes to IgorVision. Format loosely follows
 - Config: `overlap_check` (default `True`); UI state persisted via
   QSettings (`ui/overlap_check`).
 
+## v0.2 – 2026-09-13
+
+### Phase 3 – Exposure & White Balance (Exposure & WB)
+
+- **Exposure consistency** (`Expo drift`): per-image EXIF **EV100**
+  (`EV = log2(N² / (t · ISO/100))`) vs. the set's robust median (≥ 3
+  images with EXIF), with a **luminance-median fallback** when EXIF is
+  missing. Direct auto-exposure drift signal.
+- **White-balance consistency** (`WB drift`): white-point gain vector
+  (R/G, B/G from the per-channel 95th percentile – robust to clipped
+  highlights) vs. the set median; plus a **Kelvin estimate** (CIE-1931
+  chromaticity + McCamy) as a *directional* sanity check – an estimate,
+  not a lab value.
+- **Low dynamic range** (`Flat`): used tonal span (luma p95−p5) below
+  `min_dynamic_range` → washed out.
+- **ISO / aperture drift** (`Hi-ISO`, `Aperture drift`): relative to the
+  set median, in stops (noise + DoF/bokeh mismatch).
+- All five are **warnings (🟡)**, not hard rejects; **raw values always
+  exported** (CSV + info panel) for calibration. CSV grows to **54 columns**.
+- New `status_text` flags: Expo drift · WB drift · Flat · Hi-ISO · Aperture
+  drift; stats panel gains `expoΔ` / `wbΔ` / `isoΔ` chips; table tooltip
+  adds `≈ K · Δexpo · ΔWB` and the warn-background now covers the new flags.
+- Config: `exposure_consistency` / `wb_consistency` /
+  `low_dynamic_range_check` / `iso_consistency` / `aperture_consistency`
+  + thresholds (`exposure_outlier_ev` 0.5, `exposure_outlier_luma` 0.25,
+  `min_dynamic_range` 55, `wb_gain_dev_max` 0.15, `iso_dev_stops_max` 2.0,
+  `aperture_dev_stops_max` 0.5).
+
+### Phase 4 – "Soft (Motion)" warning tier
+
+- New **additive "Soft (Motion)" 🟡 warning** for images the motion-blur
+  detector flags as *real* (both cues, AND) but not strong enough to push
+  the score below `blur_threshold` – captures that are **"slightly
+  smeared"** (slight camera shake at capture) and would otherwise still
+  read "Sharp". **Warning only, never a reject.**
+- Calibrated on the Staatsgalerie Raum13 set (536 Canon 45 MP images):
+  genuine slight-blur fires ~0.47 while weak directional-texture fires
+  (herringbone floors, windows, radiators) stay at 0.15 or below – the
+  floor sits in that gap, so exactly one image is surfaced and the 27
+  genuinely-blurry images are unchanged.
+- Config: `motion_blur_soft_check` (default `True`) + `soft_mb_floor`
+  (default **0.20**). Lower the floor (e.g. `0.10`) to surface more
+  candidates; raise it to tighten.
+- UI: status column shows "Soft (Motion)" (🟡); the info panel shows it on
+  the motion-blur line; the stats panel gains a `soft` chip and excludes
+  soft images from the clean count; table rows get the warn background and
+  the tooltip now carries the MB penalty. CSV gains a `soft_motion_blur`
+  column (55 columns total); the raw `mb_*` values are unchanged.
+
+## v0.1 – 2026-09-13
+
+### Phase 1 – Ingestion & EXIF
+
+- **RAW decoding** (`.dng .cr2 .nef .arw …`) via `rawpy` (optional dep,
+  `postprocess()` → sRGB uint8; EXIF from `raw.other` / `raw.lens`).
+- **HEIC/HEIF** via `pillow-heif` (optional dep); graceful "install …"
+  fallback note when the backend is missing or the file is corrupt.
+- **16-bit TIFF/RAW** normalised with `>> 8` so brightness/exposure
+  semantics stay correct.
+- **EXIF parsing** (Pillow, header-only): camera, aperture, **shutter**,
+  ISO, focal length, GPS, datetime – surfaced in the info panel and CSV.
+- **EXIF orientation applied** exactly once (portrait photos analysed
+  upright); `cv2.IMREAD_IGNORE_ORIENTATION` added to prevent the double
+  rotation OpenCV ≥ 4 otherwise performs on JPEGs.
+- **Slow-shutter corroboration**: flags `shutter > 1 / focal_length`
+  to sharpen motion-blur evidence (shown when a photo is also blurry).
+- **Fast decode** of very large files via `cv2.IMREAD_REDUCED_COLOR_*`
+  (50 MP JPEGs decode ~4–16× faster; pipeline only needs `analysis_dim`).
+- **MD5** computed from the decoded bytes (no extra read on the cv2 path)
+  → duplicate detection across the batch.
+
+### Phase 2 – SfM / photogrammetry checks
+
+- **Feature-density check** (Harris corners / 1 k px above an absolute
+  response threshold) – catches "sharp but feature-poor" images (sky,
+  plain wall, water, snow) that are useless for the reconstruction.
+- **Clipping check** – fraction of clipped highlights (any channel ≥ 253)
+  and crushed shadows (all channels ≤ 2).
+- **Duplicate (MD5) detection** – every file after the first of a hash
+  group is flagged and points at the original path.
+- **Batch statistics panel** – status counts, 24-bin score histogram with
+  threshold tick, and best/worst image (click → select in table).
+- **Status column** now combines blur + exposure + clipping + few features
+  + duplicate + slow shutter (shared `models.status_text`).
+- `build_export_rows()` extracted (Qt-free, testable) and shared by the
+  CSV export and the upcoming CLI/JSON output; CSV now carries all
+  quality, photogrammetry and EXIF fields (39 columns).
+- Tuning: `max_clip_low` raised 5 % → **25 %** (dark materials like thatch
+  carry 10–20 % crushed shadow without being underexposed);
+  `max_clip_high` stays 2 %.
+
+### Preview & zoom
+
+- Preview now loads the **full-resolution** file (was: 128 px table
+  thumbnail) so zooming stays sharp; very large files are decoded with a
+  soft cap to keep memory/decode time sane.
+- Zoom toolbar above the preview: `+` / `−` buttons, **Center**
+  (re-centre), **Fit** (fit to view), and a zoom **dropdown** with
+  presets **25 % / 50 % / 100 % / 200 % / 300 %** (100 % = 1:1 pixels).
+- `ImageViewer` gains `zoom_in` / `zoom_out` / `zoom_to` / `center_image`
+  / `reset_view` / `current_zoom_percent` and a `zoom_changed` signal that
+  keeps the combo in sync; mouse-wheel zoom stays anchored under the cursor.
+
 ### Repo hygiene & settings
 
 - Repo hygiene: debug scripts → `tools/`, calibration dumps & crop PNGs →
@@ -365,7 +460,7 @@ All notable changes to IgorVision. Format loosely follows
   quality threshold, filter mode, recursive toggle, and the last used
   folder survive an app restart (QSettings).
 
-## 5.0.0 – 2026-09-12
+### Initial release (formerly 5.0.0)
 
 - Bokeh-aware **absolute** scoring (top-k block sharpness,
   resolution-normalised, log-linear 0…1 mapping).

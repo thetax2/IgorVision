@@ -6,10 +6,9 @@ Compare tab: reconcile Ingest_Backup vs. shooting days via CompareWorker.
 
 from __future__ import annotations
 
-import shutil as _shutil
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QStandardPaths, QTimer
+from PyQt5.QtCore import Qt, QSettings, QStandardPaths
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QCheckBox, QFileDialog, QGroupBox, QHBoxLayout, QHeaderView,
@@ -19,13 +18,14 @@ from PyQt5.QtWidgets import (
 
 from tools.comparison import (
     CompareConfig, DEFAULT_EXTENSIONS, NamePartConfig, SubfolderConfig,
+    detect_exiftool,
     is_within,
 )
 from tools.db import db_file_name
 from ui.log_panel import LogPanel
 from ui.path_row import PathRow
 from tools.compare_worker import (
-    CompareWorker, ExifToolCheckWorker, ReplanWorker, TransferWorker,
+    CompareWorker, ReplanWorker, TransferWorker,
 )
 
 
@@ -75,23 +75,6 @@ def show_compare_info(parent=None) -> None:
     box.setStandardButtons(QMessageBox.Ok)
     box.setTextInteractionFlags(Qt.TextSelectableByMouse)
     box.exec()
-
-
-# ── ExifTool detection ───────────────────────────────────────────────────────
-
-def detect_exiftool() -> str:
-    """Find ExifTool in PATH and in common install locations."""
-    found = _shutil.which("exiftool")
-    if found:
-        return found
-    for cand in (
-        r"C:\Tools\exiftool.exe",
-        r"C:\Program Files\exiftool\exiftool.exe",
-        r"C:\Program Files (x86)\exiftool\exiftool.exe",
-    ):
-        if Path(cand).is_file():
-            return cand
-    return ""
 
 
 # ── Tab ──────────────────────────────────────────────────────────────────────
@@ -271,19 +254,7 @@ class CompareTab(QWidget):
         rename.addLayout(row_np)
         self._chk_rename.toggled.connect(self._on_rename_toggled)
 
-        # ExifTool (at the end of the rename section)
-        row_exif = QHBoxLayout()
-        row_exif.setContentsMargins(0, 0, 0, 0)
-        row_exif.addWidget(QLabel("ExifTool:"))
-        self._ed_exif = QLineEdit()
-        self._ed_exif.setPlaceholderText("Not set → capture date from file date")
-        btn_exif = QPushButton("Browse …")
-        btn_exif.clicked.connect(self._pick_exiftool)
-        self._lbl_exif_status = QLabel("")
-        row_exif.addWidget(self._ed_exif, 1)
-        row_exif.addWidget(btn_exif)
-        row_exif.addWidget(self._lbl_exif_status)
-        rename.addLayout(row_exif)
+        # ExifTool is a program-wide setting (Settings → Preferences).
         rename.addStretch(1)  # keep content at the top, no row stretching
 
         # Keep the box at its natural height – the rest belongs to the table.
@@ -321,11 +292,6 @@ class CompareTab(QWidget):
         mid.addWidget(verz_box, 1, Qt.AlignTop)
 
         root.addLayout(mid)
-
-        # ExifTool: auto-detection + status
-        self._ed_exif.setText(detect_exiftool())
-        self._ed_exif.textChanged.connect(self._update_exif_status)
-        self._update_exif_status()
 
         # -- Progress --
         self.progress = QProgressBar()
@@ -366,53 +332,14 @@ class CompareTab(QWidget):
         for cb in (self._np_date, self._np_model, self._np_lens, self._np_focal):
             cb.setEnabled(on)
 
-    def _pick_exiftool(self) -> None:
-        p, _ = QFileDialog.getOpenFileName(
-            self, "Select ExifTool", "C:/Tools",
-            "ExifTool (*.exe);;All (*)",
-        )
-        if p:
-            self._ed_exif.setText(p)
+    def _exiftool_bin(self) -> str:
+        """Global ExifTool setting (Settings → Preferences).
 
-    def _update_exif_status(self) -> None:
-        """ExifTool status (debounced + async, does not block the GUI)."""
-        path = self._ed_exif.text().strip()
-        if not path:
-            self._lbl_exif_status.setText("")
-            return
-        self._lbl_exif_status.setText("…")
-        self._lbl_exif_status.setStyleSheet("color: gray;")
-        # Pause briefly (typing throttle) then check in the background.
-        if not hasattr(self, "_exif_timer"):
-            self._exif_timer = QTimer(self)
-            self._exif_timer.setSingleShot(True)
-            self._exif_timer.setInterval(300)
-            self._exif_timer.timeout.connect(self._run_exif_check)
-        self._exif_timer.start()
-
-    def _run_exif_check(self) -> None:
-        path = self._ed_exif.text().strip()
-        if not path:
-            return
-        self._lbl_exif_status.setText("… checking")
-        self._lbl_exif_status.setStyleSheet("color: gray;")
-        worker = ExifToolCheckWorker(path, parent=self)
-        worker.sig_done.connect(
-            lambda ok, p=path: self._on_exif_check_done(ok, p)
-        )
-        worker.start()
-
-    def _on_exif_check_done(self, ok: bool, checked_path: str) -> None:
-        # Ignore a stale result: a different path was typed in the meantime
-        # → the status is overwritten by the new check.
-        if self._ed_exif.text().strip() != checked_path:
-            return
-        if ok:
-            self._lbl_exif_status.setText("✓ found")
-            self._lbl_exif_status.setStyleSheet("color: #6eb26a; font-weight: bold;")
-        else:
-            self._lbl_exif_status.setText("✗ not found")
-            self._lbl_exif_status.setStyleSheet("color: #ef5350; font-weight: bold;")
+        Falls back to auto-detection (PATH + common install locations)
+        when no path is configured.
+        """
+        p = str(QSettings().value("prefs/exiftool", "") or "").strip()
+        return p or detect_exiftool()
 
     # -- Actions --
 
@@ -480,7 +407,7 @@ class CompareTab(QWidget):
             output_dir=Path(out_s),
             extensions=DEFAULT_EXTENSIONS,
             use_hash=self._chk_hash.isChecked(),
-            exiftool_bin=self._ed_exif.text().strip(),
+            exiftool_bin=self._exiftool_bin(),
             rename_prefix=self._ed_prefix.text().strip() if rename_on else "",
             rename_suffix=self._ed_suffix.text().strip() if rename_on else "",
             subfolders=SubfolderConfig(

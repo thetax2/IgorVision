@@ -22,7 +22,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-__version__ = "5.0.0"
+__version__ = "0.7.0"
 
 
 def main() -> None:

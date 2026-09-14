@@ -217,6 +217,41 @@ def check_exiftool(binary: str) -> bool:
         return False
 
 
+def exiftool_version(binary: str) -> str:
+    """Return the ExifTool version string (e.g. ``12.95``) or ``""``."""
+    if not binary:
+        return ""
+    try:
+        proc = subprocess.run(
+            [binary, "-ver"], capture_output=True, text=True, timeout=5)
+        if proc.returncode == 0:
+            return proc.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+def detect_exiftool() -> str:
+    """Find ExifTool in PATH and in common install locations.
+
+    Returns the full path or ``""`` when nothing was found.  ExifTool is
+    a Perl script wrapper: on Windows the ``exiftool(-k).exe`` from the
+    zip release is renamed to ``exiftool.exe`` and works standalone, so
+    any of those locations is a valid candidate.
+    """
+    found = shutil.which("exiftool")
+    if found:
+        return found
+    for cand in (
+        r"C:\Tools\exiftool.exe",
+        r"C:\Program Files\exiftool\exiftool.exe",
+        r"C:\Program Files (x86)\exiftool\exiftool.exe",
+    ):
+        if Path(cand).is_file():
+            return cand
+    return ""
+
+
 def sanitize_part(value: object) -> str:
     s = "".join("_" if c in _INVALID_CHARS else c for c in str(value or ""))
     return s.strip().rstrip(".")
