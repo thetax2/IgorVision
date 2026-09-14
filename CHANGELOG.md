@@ -3,9 +3,6 @@
 All notable changes to IgorVision. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/) – date + short entries.
 
-Versioning follows the `Backup/IgorVision_vX.Y.zip` scheme –
-small increments, big jumps only at user-defined milestones.
-
 ## v0.7 – 2026-09-14
 
 ### Crash fix – standalone overlap scan (recursive repaint)
