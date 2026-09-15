@@ -3,6 +3,37 @@
 All notable changes to IgorVision. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/) – date + short entries.
 
+## v0.72 – 2026-09-15
+
+### GUI cleanup – tab-specific toolbars, preview bottom bar, right-side tabs
+
+- **Tab-specific toolbars**: the Quality tab shows *Select Folder, Select
+  Images, Start Analysis, Stop, Include Subfolders, Overlap-Check*; the
+  Overlap tab only *Scan Overlap* + a new working **Stop Scan** button
+  (stops the running overlap scan via the worker's stop event).
+- **Move buttons** (Move to Keep / Move to Reject / Explorer / Export
+  CSV) moved into the preview area: a floating bottom bar centred at the
+  bottom of the image viewer, below the zoom buttons, visible in the
+  Quality tab only (the Overlap tab will get its own workflow buttons).
+- **Zoom buttons** (-, +, Center, Fit, %) in the same bottom bar; the
+  bar re-centres on every resize, follows the dark/light theme and is
+  width-capped to the preview.
+- **Right-side tabs** (replace the old info tabs below the preview):
+  - Quality tab: *Settings* (the existing settings panel), *Metrics*
+    (old *Quality* + *Exposure & WB* + *Global* tabs merged into one
+    page with three sections), *EXIF* (EXIF data of the image only).
+  - Overlap tab: *Settings* (SIFT page), *SFM* (photogrammetry checks –
+    moved out of the Quality tab, they belong to the overlap workflow).
+  - Switching top-level tabs falls back to the first tab (Settings)
+    when the active one is hidden.
+- **Auto-preview after a successful scan**: the best image (row 1 of the
+  quality-sorted table) is selected automatically so the preview shows a
+  result immediately (skipped for manually stopped scans).
+- **Polish**: ASCII `-`/`+` zoom glyphs (the Unicode minus rendered as
+  an empty box), symbol-less Center/Fit labels, equal edge spacing for
+  the *Show Blurry Only* button, 6 px gap between the image list and the
+  splitter handle.
+
 ## v0.71 – 2026-09-15
 
 ### Batch statistics panel – reworked as a range-selection tool

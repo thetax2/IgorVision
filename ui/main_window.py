@@ -10,7 +10,7 @@ import os
 import sys
 import threading
 
-from PyQt5.QtCore import QObject, Qt, QSettings, QThread, pyqtSignal
+from PyQt5.QtCore import QEvent, QObject, Qt, QSettings, QThread, pyqtSignal
 from PyQt5.QtGui import QColor
 
 try:  # PyQt5 < 5.12 style
@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QGridLayout,
+    QFrame,
     QHeaderView,
     QHBoxLayout,
     QLabel,
@@ -31,10 +31,12 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QTabBar,
     QTabWidget,
     QTableWidget,
@@ -237,6 +239,7 @@ class MainWindow(QMainWindow):
         self._worker: _AnalysisWorker | None = None
         self._thread: QThread | None = None
         self._stop_event: threading.Event | None = None
+        self._overlap_stop: threading.Event | None = None
 
         # persisted across sessions (see _load_settings / _save_settings)
         self._last_folder: str = ""
@@ -280,39 +283,67 @@ class MainWindow(QMainWindow):
         page_layout = QVBoxLayout(analysis_page)
         page_layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- toolbar ---
-        toolbar = QHBoxLayout()
+        # --- top toolbar row: tab-specific controls ---
+        # Quality: input + analysis; Overlap: scan controls.  The move
+        # buttons live in the preview area (bottom bar, see below).
+        top_toolbar = QWidget()
+        top_layout = QHBoxLayout(top_toolbar)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        # --- tab-specific controls: Quality ---
+        self._toolbar_quality = QWidget()
+        qbar = QHBoxLayout(self._toolbar_quality)
+        qbar.setContentsMargins(0, 0, 0, 0)
 
         self._btn_folder = QPushButton("📁  Select Folder")
         self._btn_files = QPushButton("🖼️  Select Images")
-        self._chk_recursive = QCheckBox("Include Subfolders")
-        self._chk_recursive.setChecked(True)
 
         # CPU cores now live in Settings → Preferences (program-wide).
 
         self._btn_start = QPushButton("🚀  Start Analysis")
         self._btn_stop = QPushButton("⏹  Stop")
         self._btn_stop.setEnabled(False)
-        self._btn_overlap_scan = QPushButton("🔍  Scan Overlap")
-        self._btn_overlap_scan.setEnabled(False)  # enabled after quality analysis
 
-        toolbar.addWidget(self._btn_folder)
-        toolbar.addWidget(self._btn_files)
-        toolbar.addWidget(self._chk_recursive)
+        self._chk_recursive = QCheckBox("Include Subfolders")
+        self._chk_recursive.setChecked(True)
         self._chk_overlap = QCheckBox("Overlap-Check")
         self._chk_overlap.setChecked(True)
-        toolbar.addWidget(self._chk_overlap)
-        toolbar.addWidget(self._btn_start)
-        toolbar.addWidget(self._btn_overlap_scan)
-        toolbar.addWidget(self._btn_stop)
-        toolbar.addStretch()
-        page_layout.addLayout(toolbar)
+
+        qbar.addWidget(self._btn_folder)
+        qbar.addWidget(self._btn_files)
+        qbar.addWidget(self._btn_start)
+        qbar.addWidget(self._btn_stop)
+        qbar.addWidget(self._chk_recursive)
+        qbar.addWidget(self._chk_overlap)
+
+        # --- tab-specific controls: Overlap ---
+        self._toolbar_overlap = QWidget()
+        ovar = QHBoxLayout(self._toolbar_overlap)
+        ovar.setContentsMargins(0, 0, 0, 0)
+
+        self._btn_overlap_scan = QPushButton("🔍  Scan Overlap")
+        self._btn_overlap_scan.setEnabled(False)  # enabled after quality analysis
+        self._btn_overlap_stop = QPushButton("⏹  Stop Scan")
+        self._btn_overlap_stop.setEnabled(False)
+
+        ovar.addWidget(self._btn_overlap_scan)
+        ovar.addWidget(self._btn_overlap_stop)
+
+        top_layout.addWidget(self._toolbar_quality)
+        top_layout.addWidget(self._toolbar_overlap)
+        top_layout.addStretch(1)
+
+        page_layout.addWidget(top_toolbar)
+        self._toolbar_overlap.setVisible(False)  # app starts on the Quality tab
 
         # --- main splitter ---
         splitter = self._splitter = QSplitter(Qt.Horizontal)
 
         # left: stacked results views (Quality / Overlap)
         self._left_stack = QStackedWidget()
+        # small gap between the results area and the splitter handle –
+        # without it the handle sits flush against the image list
+        self._left_stack.setContentsMargins(0, 0, 6, 0)
 
         # --- view 1: Quality (table + filters) ---
         quality_view = QWidget()
@@ -358,6 +389,11 @@ class MainWindow(QMainWindow):
         self._btn_show_blurry = QPushButton("Show Blurry Only")
         filter_row.addWidget(self._btn_show_all)
         filter_row.addWidget(self._btn_show_blurry)
+        # The last button must not sit flush against the window edge –
+        # the right margin equals the inter-button spacing (style metric,
+        # i.e. exactly the gap between "Show All" and "Show Blurry Only").
+        filter_row.setContentsMargins(
+            0, 0, self.style().pixelMetric(QStyle.PM_LayoutHorizontalSpacing), 0)
         quality_layout.addLayout(filter_row)
 
         self._left_stack.addWidget(quality_view)
@@ -396,17 +432,25 @@ class MainWindow(QMainWindow):
         self._viewer.setMinimumSize(300, 160)
         self._viewer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # --- zoom toolbar above the preview ---
-        zoom_bar = QWidget()
-        zrow = QHBoxLayout(zoom_bar)
-        zrow.setContentsMargins(0, 0, 0, 0)
+        # --- bottom bar: zoom buttons + move buttons, floating centred
+        #     at the bottom of the preview.  Zoom row on top, move
+        #     buttons below (Quality tab only – see _on_top_tab_changed). ---
+        self._bottom_bar = QWidget(self._viewer)
+        bcol = QVBoxLayout(self._bottom_bar)
+        bcol.setContentsMargins(10, 6, 10, 6)
+        bcol.setSpacing(5)
+
+        zrow = QHBoxLayout()
         zrow.setSpacing(4)
-        self._btn_zoom_out = QPushButton("−")
+        # ASCII glyphs ("-" / "+") – the Unicode minus (U+2212) is not in
+        # the app font and rendered as an empty box.  No leading symbols
+        # on Center / Fit (⌖ / ⤢) – same font issue.
+        self._btn_zoom_out = QPushButton("-")
         self._btn_zoom_in = QPushButton("+")
-        self._btn_zoom_center = QPushButton("⌖ Center")
-        self._btn_zoom_fit = QPushButton("⤢ Fit")
-        self._btn_zoom_in.setFixedWidth(30)
-        self._btn_zoom_out.setFixedWidth(30)
+        self._btn_zoom_center = QPushButton("Center")
+        self._btn_zoom_fit = QPushButton("Fit")
+        self._btn_zoom_in.setFixedWidth(34)
+        self._btn_zoom_out.setFixedWidth(34)
         self._zoom_combo = QComboBox()
         self._zoom_combo.setEditable(True)
         self._zoom_combo.addItems(["25 %", "50 %", "100 %", "200 %", "300 %"])
@@ -416,40 +460,49 @@ class MainWindow(QMainWindow):
         zrow.addWidget(self._btn_zoom_center)
         zrow.addWidget(self._btn_zoom_fit)
         zrow.addWidget(self._zoom_combo)
-        zrow.addStretch(1)
-        right_layout.addWidget(zoom_bar)
-        right_layout.addWidget(self._viewer, 1)   # preview = majority of the right side
+        bcol.addLayout(zrow)
 
-        # Info: compact tabbed panel below the preview (replaces the long scroll wall)
-        self._info_tabs = QTabWidget()
-        self._info_tabs.setDocumentMode(True)
-        self._info_labels = {}
-        self._build_info_tabs()
-        self._info_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self._info_tabs.setMaximumHeight(280)
-        self._clear_info()
-        right_layout.addWidget(self._info_tabs, 0)
-
-        # action buttons (compact 2x2 grid to keep the preview large)
+        # move buttons (Quality tab only – see _on_top_tab_changed)
+        self._move_buttons = QWidget()
+        mrow = QHBoxLayout(self._move_buttons)
+        mrow.setContentsMargins(0, 0, 0, 0)
+        mrow.setSpacing(6)
         self._btn_keep = QPushButton("📁 Move to Keep")
         self._btn_reject = QPushButton("🗑️ Move to Reject")
         self._btn_explorer = QPushButton("📂 Explorer")
         self._btn_export = QPushButton("📊 Export CSV")
-        actions = QGridLayout()
-        actions.setSpacing(6)
-        actions.addWidget(self._btn_keep, 0, 0)
-        actions.addWidget(self._btn_reject, 0, 1)
-        actions.addWidget(self._btn_explorer, 1, 0)
-        actions.addWidget(self._btn_export, 1, 1)
-        right_layout.addLayout(actions)
+        for btn in (self._btn_keep, self._btn_reject,
+                    self._btn_explorer, self._btn_export):
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            mrow.addWidget(btn)
+        bcol.addWidget(self._move_buttons)
 
-        # --- settings panel (right of the preview, tab-aware) ---
+        self._style_bottom_bar()
+        # keep the bar centred when the preview resizes (window drag,
+        # splitter, maximise, …)
+        self._viewer.installEventFilter(self)
+        right_layout.addWidget(self._viewer, 1)   # preview = majority of the right side
+
+        # --- right-side tabs (replaces the old info tabs below the
+        #     preview):  Quality → Settings / Metrics / EXIF
+        #                Overlap → Settings / SFM
+        #     (tab visibility swaps in _on_top_tab_changed) ---
         self._settings = SettingsPanel()
         self._settings.setMinimumWidth(280)
 
+        self._right_tabs = QTabWidget()
+        self._right_tabs.setDocumentMode(True)
+        self._info_labels = {}
+        self._right_tabs.addTab(self._settings, "Settings")
+        self._build_right_tabs()
+        self._clear_info()
+        self._right_tabs.setMinimumWidth(280)
+        # initial state = Quality tab: SFM (index 3) hidden
+        self._right_tabs.setTabVisible(3, False)
+
         self._right_split = QSplitter(Qt.Horizontal)
         self._right_split.addWidget(preview_col)
-        self._right_split.addWidget(self._settings)
+        self._right_split.addWidget(self._right_tabs)
         self._right_split.setSizes([600, 320])
         self._right_split.setChildrenCollapsible(False)
 
@@ -533,6 +586,7 @@ class MainWindow(QMainWindow):
         # the preview canvas background is not styled via QSS – keep it in
         # sync manually (dark gray instead of the old glaring light gray)
         self._viewer.set_theme(theme)
+        self._style_bottom_bar()
         self._act_theme_dark.setChecked(theme == "dark")
         self._act_theme_light.setChecked(theme == "light")
 
@@ -555,6 +609,7 @@ class MainWindow(QMainWindow):
         self._btn_start.clicked.connect(self._start_analysis)
         self._btn_stop.clicked.connect(self._stop_analysis)
         self._btn_overlap_scan.clicked.connect(self._start_overlap_scan)
+        self._btn_overlap_stop.clicked.connect(self._stop_overlap_scan)
 
         # The standalone overlap scan runs on a *raw Python thread* (not a
         # QThread).  For such threads QThread::currentThread() reports the
@@ -717,7 +772,6 @@ class MainWindow(QMainWindow):
         # Re-apply the active filter so it is never dropped when new
         # results arrive (the quality-threshold slider persists).
         self._apply_active_filter()
-
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
         self._btn_overlap_scan.setEnabled(True)
@@ -726,6 +780,14 @@ class MainWindow(QMainWindow):
 
         total = len(results)
         blurry = sum(1 for r in results if r.is_blurry)
+
+        # After a *successful* scan, show the best image (row 0 – the
+        # table is sorted by quality, descending) in the preview so the
+        # user immediately sees a result.  Skipped when the scan was
+        # stopped manually (partial results).
+        stopped = self._stop_event is not None and self._stop_event.is_set()
+        if not stopped and self._table.rowCount() > 0:
+            self._auto_select_best()
 
         # Auto-start overlap scan with keypoint visualisation if enabled
         if self._chk_overlap.isChecked() and len(results) > 1:
@@ -744,6 +806,24 @@ class MainWindow(QMainWindow):
             self._thread.wait(2000)
             self._thread = None
             self._worker = None
+
+    def _auto_select_best(self) -> None:
+        """Select row 0 (the best image) so the preview shows it right
+        after a successful scan.
+
+        Goes through the selection model (NOT selectRow()) – same
+        pattern as the histogram range selection.  The single-row
+        selection fires ``selectionChanged`` → ``_on_selection_changed``,
+        which loads the full-resolution preview and the info tabs.
+        """
+        from PyQt5.QtCore import QItemSelectionModel
+
+        sm = self._table.selectionModel()
+        if sm is None:
+            return
+        sm.select(self._table.model().index(0, 0),
+                  QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+        self._table.scrollToItem(self._table.item(0, 0))
 
     def _on_error(self, msg: str) -> None:
         logger.error(msg)
@@ -766,6 +846,7 @@ class MainWindow(QMainWindow):
         from workers import OverlapScanWorker
 
         self._btn_overlap_scan.setEnabled(False)
+        self._btn_overlap_stop.setEnabled(True)
         self._btn_start.setEnabled(False)
         self._progress.setValue(0)
         self._progress_label.setText("Overlap Scan: starting…")
@@ -801,6 +882,18 @@ class MainWindow(QMainWindow):
         self._overlap_thread_ref = threading.Thread(target=worker.run, daemon=True)
         self._overlap_thread_ref.start()
 
+    def _stop_overlap_scan(self) -> None:
+        """Request a stop of the running overlap scan.
+
+        The worker checks the stop event between image pairs and then
+        fires its finished callback, which re-enables the buttons
+        (see _on_overlap_scan_done).
+        """
+        if self._overlap_stop is not None:
+            self._overlap_stop.set()
+        self._btn_overlap_stop.setEnabled(False)
+        self.statusBar().showMessage("Overlap scan stopping…")
+
     def _on_keypoints_visualize(self, path: str, kpts: np.ndarray, matches: int) -> None:
         """GUI-thread handler: show keypoints on the image in the preview."""
         print(f"[KPT] Visualising {len(kpts)} keypoints on {os.path.basename(path)} "
@@ -821,6 +914,7 @@ class MainWindow(QMainWindow):
         (queued from the worker thread – see _connect_signals)."""
         self._populate_overlap_table(self._results)
         self._btn_overlap_scan.setEnabled(True)
+        self._btn_overlap_stop.setEnabled(False)
         self._btn_start.setEnabled(True)
         self._progress.setValue(1000)
         self._progress_label.setText("Overlap Scan: Done")
@@ -906,27 +1000,76 @@ class MainWindow(QMainWindow):
         self._zoom_combo.setEditText(f"{pct} %")
         self._zoom_combo.blockSignals(False)
 
-    def _build_info_tabs(self) -> None:
+    def _style_bottom_bar(self) -> None:
+        """Give the floating bottom bar a themed, slightly raised background."""
+        from styles import DARK, LIGHT, current_theme
+
+        app = QApplication.instance()
+        theme = current_theme(app) if app is not None else "dark"
+        palette = DARK if theme == "dark" else LIGHT
+        self._bottom_bar.setStyleSheet(
+            f"background-color: {palette['bg_raised']};"
+            f"border: 1px solid {palette['border']};"
+            "border-radius: 8px;"
+        )
+
+    def _reposition_bottom_bar(self) -> None:
+        """Keep the bottom bar centred at the bottom of the preview and
+        never wider than the preview itself (so it cannot overflow when
+        the preview is narrow)."""
+        bar = self._bottom_bar
+        vw = self._viewer.width()
+        vh = self._viewer.height()
+        if not vw or not vh:
+            return
+        bar.setMaximumWidth(max(1, vw - 16))
+        bar.adjustSize()
+        x = max(0, (vw - bar.width()) // 2)
+        y = max(0, vh - bar.height() - 8)
+        bar.move(x, y)
+
+    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+        """Re-centre the floating bottom bar when the preview resizes
+        (fires when the preview reaches its final size, which the
+        splitter/window signals do not reliably cover)."""
+        if obj is self._viewer and event.type() == QEvent.Resize:
+            self._reposition_bottom_bar()
+        return super().eventFilter(obj, event)
+
+    def _build_right_tabs(self) -> None:
         """
-        Build the compact tabbed info panel (replaces the old single-label
-        scroll wall).  Each tab is a rich-text ``QLabel`` stored in
-        ``self._info_labels`` keyed by a short id used by ``_update_info``.
+        Build the right-side metric tabs (the "Settings" tab is added by
+        the caller – it hosts the existing ``SettingsPanel``).
+
+        Each page is a rich-text ``QLabel`` in a scroll area, stored in
+        ``self._info_labels`` keyed by a short id used by ``_update_info``:
+
+        * **Metrics** (Quality tab): the old *Quality*, *Exposure & WB*
+          and *Global* tabs merged into one page with three sections.
+        * **EXIF** (Quality tab): exactly the EXIF data of the image.
+        * **SFM** (Overlap tab): the photogrammetry / SfM readiness
+          checks (moved out of the Quality tab – they belong to the
+          overlap workflow).
+
+        Which tabs are visible depends on the active top-level tab
+        (see ``_on_top_tab_changed``).
         """
-        tabs = [
-            ("Quality", "score"),
-            ("SfM checks", "sfm"),
-            ("Exposure & WB", "ewb"),
-            ("EXIF", "exif"),
-            ("Global", "global"),
-        ]
-        for title, key in tabs:
+        def _page(key: str, title: str) -> None:
             label = QLabel("")
             label.setWordWrap(True)
             label.setTextFormat(Qt.RichText)
             label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
             label.setContentsMargins(6, 6, 6, 6)
-            self._info_tabs.addTab(label, title)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setWidget(label)
+            self._right_tabs.addTab(scroll, title)
             self._info_labels[key] = label
+
+        _page("metrics", "Metrics")
+        _page("exif", "EXIF")
+        _page("sfm", "SFM")
 
     def _clear_info(self) -> None:
         """Reset all info tabs to an empty state (no selection)."""
@@ -1029,11 +1172,23 @@ class MainWindow(QMainWindow):
         • Brightness: {r.brightness:.1f}<br>
         • Saturation: {r.saturation:.1f}
         """
-        self._info_labels["score"].setText(score_html)
+        # Metrics tab: the old Quality / Exposure & WB / Global tabs
+        # merged into one page (dup-warning + load-error live in the
+        # Quality section, keeping the EXIF tab EXIF-only)
+        self._info_labels["metrics"].setText(
+            score_html + dup_html + ewb_html + "<hr>" + global_html
+        )
+        # EXIF tab: exactly the EXIF data of the image
+        exif_body = exif_html
+        if exif_body.startswith("<hr>"):
+            exif_body = exif_body[len("<hr>"):]
+        if exif_body:
+            exif_body = exif_body.replace("<b>EXIF:</b><br>", "", 1)
+            self._info_labels["exif"].setText(exif_body)
+        else:
+            self._info_labels["exif"].setText("<i>no EXIF data</i>")
+        # SFM tab (Overlap tab): photogrammetry readiness checks
         self._info_labels["sfm"].setText(sfm_html)
-        self._info_labels["ewb"].setText(ewb_html)
-        self._info_labels["exif"].setText((exif_html + dup_html) or "<i>no EXIF data</i>")
-        self._info_labels["global"].setText(global_html)
 
     def _open_preview_dialog(self, row: int, _col: int) -> None:
         r = self._result_at_row(row)
@@ -1109,14 +1264,32 @@ class MainWindow(QMainWindow):
     def _on_top_tab_changed(self, index: int) -> None:
         """Top-level tab switch.
 
-        Tabs 0/1 (Quality / Overlap) share the analysis page: only the
-        left results view and the settings page (quality vs. SIFT)
-        swap.  Tabs 2+ are the standalone file tools.
+        Tabs 0/1 (Quality / Overlap) share the analysis page: the left
+        results view, the settings page (quality vs. SIFT), the
+        tab-specific toolbar and the move buttons (Quality only) swap.
+        Tabs 2+ are the standalone file tools.
         """
         if index <= 1:
             self._main_stack.setCurrentIndex(0)
             self._left_stack.setCurrentIndex(index)
             self._settings.set_page(index)
+            self._toolbar_quality.setVisible(index == 0)
+            self._toolbar_overlap.setVisible(index == 1)
+            # move buttons are only meaningful in the Quality tab (the
+            # Overlap tab will get its own workflow buttons later)
+            self._move_buttons.setVisible(index == 0)
+            # right-side tabs: Quality → Settings/Metrics/EXIF,
+            # Overlap → Settings/SFM.  If the tab that was active before
+            # the switch gets hidden, fall back to the first tab
+            # (Settings) – hiding the current tab otherwise moves Qt to
+            # an adjacent tab (e.g. EXIF), which is not wanted.
+            cur = self._right_tabs.currentIndex()
+            self._right_tabs.setTabVisible(1, index == 0)  # Metrics
+            self._right_tabs.setTabVisible(2, index == 0)  # EXIF
+            self._right_tabs.setTabVisible(3, index == 1)  # SFM
+            visible = {0, 1, 2} if index == 0 else {0, 3}
+            if cur not in visible:
+                self._right_tabs.setCurrentIndex(0)
         else:
             self._main_stack.setCurrentIndex(index - 1)
 
